@@ -1,0 +1,129 @@
+@import "tailwindcss";
+
+:root {
+  --ink: #14212b;
+  --ink-soft: #4a5c66;
+  --mist: #f3f7f9;
+  --surface: #f5f7fa;
+  --paper: #ffffff;
+  --line: #d6e0e5;
+  --accent: #0f756e;
+  --accent-soft: #def5f0;
+  --accent-deep: #0d625c;
+  --warn: #b85205;
+  --warn-soft: #fff2e3;
+  --danger: #b82e29;
+  --danger-soft: #fff0ef;
+  --ok: #057857;
+  --ok-soft: #def5f0;
+  --mock: #b85205;
+  --mock-soft: #fff2e3;
+  --shadow: 0 1px 0 rgba(20, 33, 43, 0.04);
+  --radius: 6px;
+  --background: var(--mist);
+  --foreground: var(--ink);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-mist: var(--mist);
+  --color-surface: var(--surface);
+  --color-paper: var(--paper);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-deep: var(--accent-deep);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-mock: var(--mock);
+  --color-mock-soft: var(--mock-soft);
+  --font-sans: var(--font-body);
+  --font-display: var(--font-display);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background: var(--mist);
+  font-family: var(--font-body), "PingFang SC", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.scrollbar-hidden {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.scrollbar-hidden::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-rail {
+  from {
+    transform: scaleY(0.4);
+    opacity: 0;
+  }
+  to {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+.animate-rise {
+  animation: rise-in 0.45s ease-out both;
+}
+
+.animate-fade {
+  animation: fade-in 0.35s ease-out both;
+}
+
+.nav-active-rail {
+  animation: slide-rail 0.25s ease-out both;
+  transform-origin: top;
+}

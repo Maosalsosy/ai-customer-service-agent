@@ -1,0 +1,110 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_PORT:-5433}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aikefu}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aikefu}
+      POSTGRES_DB: ${POSTGRES_DB:-aikefu}
+    volumes:
+      - aikefu_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aikefu} -d ${POSTGRES_DB:-aikefu}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "${REDIS_BIND:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    command:
+      - sh
+      - -c
+      - 'if [ -n "$$REDIS_PASSWORD" ]; then exec redis-server --requirepass "$$REDIS_PASSWORD"; else exec redis-server; fi'
+    healthcheck:
+      test: ["CMD-SHELL", "if [ -n \"$${REDIS_PASSWORD}\" ]; then REDISCLI_AUTH=\"$${REDIS_PASSWORD}\" redis-cli ping; else redis-cli ping; fi | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  ai:
+    build:
+      context: ./services/ai
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${AI_BIND:-127.0.0.1}:${AI_PORT:-8000}:8000"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:-dev-ai-token}
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-deepseek}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  api:
+    build:
+      context: ./services/api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${API_BIND:-127.0.0.1}:${API_PORT:-3001}:3001"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3001
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
+      DATABASE_URL: ${API_DATABASE_URL:-postgresql://${POSTGRES_USER:-aikefu}:${POSTGRES_PASSWORD:-aikefu}@postgres:5432/${POSTGRES_DB:-aikefu}?schema=public}
+      AI_SERVICE_URL: http://ai:8000
+      AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:-dev-ai-token}
+      AUTH_SECRET: ${AUTH_SECRET:-dev-auth-secret-change-me}
+      AI_KEY_SECRET: ${AI_KEY_SECRET:-}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      BOOTSTRAP_TENANT_NAME: ${BOOTSTRAP_TENANT_NAME:-}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      ENABLE_DEMO_SEED: ${ENABLE_DEMO_SEED:-true}
+    command: ["sh", "-c", "npx prisma migrate deploy && node dist/main.js"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ai:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:3001}
+        NEXT_PUBLIC_WECOM_CALLBACK_BASE: ${NEXT_PUBLIC_WECOM_CALLBACK_BASE:-}
+    restart: unless-stopped
+    ports:
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-3000}:3000"
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:3001}
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  aikefu_pgdata:

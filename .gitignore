@@ -1,0 +1,15 @@
+node_modules/
+.next/
+dist/
+.venv/
+__pycache__/
+*.pyc
+.env*
+!.env.example
+!.env.*.example
+*.log
+.DS_Store
+coverage/
+.turbo/
+/backups/
+/docs/

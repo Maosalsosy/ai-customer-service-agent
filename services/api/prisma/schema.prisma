@@ -1,0 +1,378 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id                   String   @id
+  name                 String   @db.VarChar(120)
+  slug                 String   @unique @db.VarChar(80)
+  status               String   @default("active") @db.VarChar(20)
+  autoSendEnabled      Boolean  @default(false) @map("auto_send_enabled")
+  defaultContactPolicy String   @default("ai") @map("default_contact_policy") @db.VarChar(16)
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  members             TenantMember[]
+  wecomConnections    WecomConnection[]
+  conversations       Conversation[]
+  externalContacts    ExternalContact[]
+  messages            Message[]
+  knowledgeDocs       KnowledgeDocument[]
+  knowledgeCategories KnowledgeCategory[]
+  knowledgeBases      KnowledgeBase[]
+  knowledgeGaps       KnowledgeGap[]
+  knowledgeIndex      KnowledgeIndexSetting?
+  replyDrafts         ReplyDraft[]
+  aiProviders         AiProviderSetting[]
+  auditLogs           AuditLog[]
+  autoDraftJobs       AutoDraftJob[]
+
+  @@map("tenants")
+}
+
+model User {
+  id           String   @id
+  email        String   @unique @db.VarChar(255)
+  displayName  String   @map("display_name") @db.VarChar(120)
+  passwordHash String?  @map("password_hash")
+  status       String   @default("active") @db.VarChar(20)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  memberships           TenantMember[]
+  assignedConversations Conversation[] @relation("Assignee")
+
+  @@map("users")
+}
+
+model TenantMember {
+  tenantId  String   @map("tenant_id")
+  userId    String   @map("user_id")
+  role      String   @db.VarChar(32)
+  status    String   @default("active") @db.VarChar(20)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([tenantId, userId])
+  @@map("tenant_members")
+}
+
+model WecomConnection {
+  id                String    @id
+  tenantId          String    @map("tenant_id")
+  channelType       String    @map("channel_type") @db.VarChar(50)
+  capability        String    @db.VarChar(50)
+  displayName       String    @map("display_name") @db.VarChar(120)
+  status            String    @db.VarChar(24)
+  corpId            String?   @map("corp_id") @db.VarChar(64)
+  agentId           String?   @map("agent_id") @db.VarChar(64)
+  knowledgeBaseId   String?   @map("knowledge_base_id")
+  knowledgeBaseIds  String[]  @default([]) @map("knowledge_base_ids")
+  externalAccountId String?   @map("external_account_id") @db.VarChar(255)
+  config            Json?
+  lastEventAt       DateTime? @map("last_event_at") @db.Timestamptz(6)
+  errorMessage      String?   @map("error_message")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  knowledgeBase    KnowledgeBase?    @relation(fields: [knowledgeBaseId], references: [id], onDelete: SetNull)
+  conversations    Conversation[]
+  externalContacts ExternalContact[]
+
+  @@index([tenantId])
+  @@map("wecom_connections")
+}
+
+model ExternalContact {
+  id              String   @id
+  tenantId        String   @map("tenant_id")
+  connectionId    String   @map("connection_id")
+  externalUserId  String   @map("external_user_id") @db.VarChar(255)
+  displayName     String   @map("display_name") @db.VarChar(120)
+  source          String   @db.VarChar(50)
+  policy          String   @default("ai") @db.VarChar(16)
+  policyReason    String?  @map("policy_reason") @db.VarChar(500)
+  policyActorId   String?  @map("policy_actor_id")
+  policyUpdatedAt DateTime @default(now()) @map("policy_updated_at") @db.Timestamptz(6)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenant        Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  connection    WecomConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+
+  @@unique([tenantId, connectionId, externalUserId])
+  @@index([tenantId, policy, updatedAt(sort: Desc)])
+  @@map("external_contacts")
+}
+
+model Conversation {
+  id                     String   @id
+  tenantId               String   @map("tenant_id")
+  connectionId           String?  @map("connection_id")
+  externalConversationId String?  @map("external_conversation_id") @db.VarChar(255)
+  externalContactId      String?  @map("external_contact_id")
+  contactName            String   @map("contact_name") @db.VarChar(120)
+  contactMeta            String?  @map("contact_meta") @db.VarChar(120)
+  preview                String   @default("")
+  status                 String   @db.VarChar(24)
+  handlingMode           String   @default("ai") @map("handling_mode") @db.VarChar(16)
+  contactPolicy          String   @default("ai") @map("contact_policy") @db.VarChar(16)
+  contactPolicyReason    String?  @map("contact_policy_reason") @db.VarChar(500)
+  contactPolicyActorId   String?  @map("contact_policy_actor_id")
+  contactPolicyUpdatedAt DateTime @default(now()) @map("contact_policy_updated_at") @db.Timestamptz(6)
+  assignedUserId         String?  @map("assigned_user_id")
+  unread                 Boolean  @default(true)
+  lastMessageAt          DateTime @default(now()) @map("last_message_at") @db.Timestamptz(6)
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  connection      WecomConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+  externalContact ExternalContact? @relation(fields: [externalContactId], references: [id], onDelete: SetNull)
+  assignee        User?            @relation("Assignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  messages        Message[]
+  drafts          ReplyDraft[]
+  knowledgeGaps   KnowledgeGap[]
+
+  @@index([tenantId, status, lastMessageAt(sort: Desc)])
+  @@map("conversations")
+}
+
+model Message {
+  id                String   @id
+  tenantId          String   @map("tenant_id")
+  conversationId    String   @map("conversation_id")
+  connectionId      String?  @map("connection_id")
+  externalMessageId String?  @map("external_message_id") @db.VarChar(255)
+  direction         String   @db.VarChar(16)
+  senderType        String   @map("sender_type") @db.VarChar(24)
+  content           String
+  deliveryStatus    String?  @map("delivery_status") @db.VarChar(24)
+  metadata          Json?
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversation Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  autoDraftJob AutoDraftJob?
+  knowledgeGap KnowledgeGap?
+
+  @@unique([connectionId, externalMessageId])
+  @@index([conversationId, createdAt])
+  @@index([tenantId])
+  @@map("messages")
+}
+
+model AutoDraftJob {
+  id                String    @id
+  tenantId          String    @map("tenant_id")
+  conversationId    String    @map("conversation_id")
+  customerMessageId String    @unique @map("customer_message_id")
+  status            String    @default("queued") @db.VarChar(16)
+  attempts          Int       @default(0)
+  totalAttempts     Int       @default(0) @map("total_attempts")
+  runAt             DateTime  @default(now()) @map("run_at") @db.Timestamptz(6)
+  lockedUntil       DateTime? @map("locked_until") @db.Timestamptz(6)
+  lastError         String?   @map("last_error") @db.VarChar(500)
+  lastFailedAt      DateTime? @map("last_failed_at") @db.Timestamptz(6)
+  completedAt       DateTime? @map("completed_at") @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenant          Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerMessage Message               @relation(fields: [customerMessageId], references: [id], onDelete: Cascade)
+  attemptLogs     AutoDraftJobAttempt[]
+
+  @@index([status, runAt])
+  @@map("auto_draft_jobs")
+}
+
+model AutoDraftJobAttempt {
+  id         String    @id
+  jobId      String    @map("job_id")
+  attemptNo  Int       @map("attempt_no")
+  status     String    @db.VarChar(16)
+  error      String?   @db.VarChar(500)
+  startedAt  DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt DateTime? @map("finished_at") @db.Timestamptz(6)
+
+  job AutoDraftJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([startedAt, status])
+  @@index([jobId, startedAt(sort: Desc)])
+  @@map("auto_draft_job_attempts")
+}
+
+model KnowledgeDocument {
+  id              String   @id
+  tenantId        String   @map("tenant_id")
+  categoryId      String?  @map("category_id")
+  knowledgeBaseId String   @map("knowledge_base_id")
+  title           String   @db.VarChar(255)
+  sourceType      String   @map("source_type") @db.VarChar(32)
+  body            String
+  status          String   @db.VarChar(24)
+  version         Int      @default(1)
+  excerpt         String?
+  reviewNote      String?  @map("review_note")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenant        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  category      KnowledgeCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  knowledgeBase KnowledgeBase      @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  chunks        KnowledgeChunk[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, knowledgeBaseId, status])
+  @@map("knowledge_documents")
+}
+
+model KnowledgeCategory {
+  id              String   @id
+  tenantId        String   @map("tenant_id")
+  knowledgeBaseId String   @map("knowledge_base_id")
+  name            String   @db.VarChar(80)
+  sortOrder       Int      @default(0) @map("sort_order")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  knowledgeBase KnowledgeBase       @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  documents     KnowledgeDocument[]
+
+  @@unique([tenantId, knowledgeBaseId, name])
+  @@index([tenantId, knowledgeBaseId, sortOrder, name])
+  @@map("knowledge_categories")
+}
+
+model KnowledgeBase {
+  id        String   @id
+  tenantId  String   @map("tenant_id")
+  name      String   @db.VarChar(120)
+  isDefault Boolean  @default(false) @map("is_default")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenant      Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  documents   KnowledgeDocument[]
+  categories  KnowledgeCategory[]
+  connections WecomConnection[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId, isDefault])
+  @@map("knowledge_bases")
+}
+
+model KnowledgeGap {
+  id                String   @id
+  tenantId          String   @map("tenant_id")
+  conversationId    String   @map("conversation_id")
+  customerMessageId String   @unique @map("customer_message_id")
+  query             String
+  knowledgeBaseId   String?  @map("knowledge_base_id")
+  status            String   @default("open") @db.VarChar(24)
+  occurrences       Int      @default(1)
+  firstSeenAt       DateTime @default(now()) @map("first_seen_at") @db.Timestamptz(6)
+  lastSeenAt        DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenant          Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  customerMessage Message      @relation(fields: [customerMessageId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status, lastSeenAt(sort: Desc)])
+  @@map("knowledge_gaps")
+}
+
+model KnowledgeChunk {
+  id         String @id
+  tenantId   String @map("tenant_id")
+  documentId String @map("document_id")
+  ordinal    Int
+  content    String
+  embedding  Unsupported("vector")
+
+  document KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, documentId])
+  @@map("knowledge_chunks")
+}
+
+/**
+ * 租户级知识检索索引规则（分段窗口等），仅管理员可改。
+ */
+model KnowledgeIndexSetting {
+  tenantId        String   @id @map("tenant_id")
+  chunkSize       Int      @default(480) @map("chunk_size")
+  chunkOverlap    Int      @default(80) @map("chunk_overlap")
+  maxChunksPerDoc Int      @default(40) @map("max_chunks_per_doc")
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("knowledge_index_settings")
+}
+
+model AiProviderSetting {
+  id        String   @id
+  tenantId  String   @map("tenant_id")
+  name      String   @db.VarChar(80)
+  provider  String   @db.VarChar(32)
+  baseUrl   String   @map("base_url") @db.VarChar(255)
+  model     String   @db.VarChar(80)
+  apiKey    String   @map("api_key")
+  active    Boolean  @default(false)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("ai_provider_settings")
+}
+
+model ReplyDraft {
+  id             String    @id
+  tenantId       String    @map("tenant_id")
+  conversationId String    @map("conversation_id")
+  content        String
+  citations      Json
+  status         String    @db.VarChar(24)
+  reason         String?
+  reviewStatus   String    @map("review_status") @db.VarChar(24)
+  modelProvider  String?   @map("model_provider") @db.VarChar(32)
+  modelName      String?   @map("model_name") @db.VarChar(80)
+  editedContent  String?   @map("edited_content")
+  reviewedAt     DateTime? @map("reviewed_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, conversationId])
+  @@map("reply_drafts")
+}
+
+model AuditLog {
+  id         String   @id
+  tenantId   String   @map("tenant_id")
+  actorId    String?  @map("actor_id")
+  action     String   @db.VarChar(64)
+  targetType String   @map("target_type") @db.VarChar(32)
+  targetId   String?  @map("target_id")
+  detail     Json?
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@map("audit_logs")
+}
