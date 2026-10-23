@@ -43,7 +43,7 @@ export class AuthGuard implements CanActivate {
     const memberships = await this.store.listMemberships(payload.sub);
     const current = memberships.find((item) => item.tenant.id === payload.tenantId);
     if (!current) {
-      throw new UnauthorizedException('当前租户成员关系已失效');
+      throw new UnauthorizedException('当前工作区成员关系已失效');
     }
 
     const auth: AuthContext = {

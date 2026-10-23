@@ -1,7 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, type ApiKnowledgeDoc, type ApiKnowledgeGap } from "@/lib/api";
+import {
+  api,
+  type ApiKnowledgeDoc,
+  type ApiKnowledgeGap,
+  type ApiKnowledgeIndexHealth,
+  type ApiKnowledgeRetrieveResult,
+} from "@/lib/api";
 import { getStoredUser } from "@/lib/auth";
 import { StatusBadge } from "@/components/status-badge";
 import { Button, EmptyState, Modal, PageHeader, Pager } from "@/components/ui";
@@ -46,6 +52,7 @@ function isAdminRole(role?: string) {
     lower === "admin" ||
     lower === "owner" ||
     raw === "管理员" ||
+    raw === "工作区管理员" ||
     raw === "租户管理员"
   );
 }
@@ -187,8 +194,17 @@ export function KnowledgeWorkbench() {
   const [rejectTargetId, setRejectTargetId] = useState<string | null>(null);
   const [rejectNote, setRejectNote] = useState("");
   const [rejecting, setRejecting] = useState(false);
+  const [gapBusyId, setGapBusyId] = useState<string | null>(null);
   const [statusTab, setStatusTab] = useState<StatusTab>("pending");
   const [statusTabTouched, setStatusTabTouched] = useState(false);
+  const [retrieveOpen, setRetrieveOpen] = useState(false);
+  const [retrieveQuery, setRetrieveQuery] = useState("");
+  const [retrieveBusy, setRetrieveBusy] = useState(false);
+  const [retrieveResult, setRetrieveResult] =
+    useState<ApiKnowledgeRetrieveResult | null>(null);
+  const [indexHealth, setIndexHealth] =
+    useState<ApiKnowledgeIndexHealth | null>(null);
+  const [reindexing, setReindexing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const notify = useCallback((message: string) => {
@@ -198,7 +214,7 @@ export function KnowledgeWorkbench() {
 
   const load = useCallback(async () => {
     try {
-      const data = await api.listKnowledge(query || undefined);
+      const data = await api.listKnowledge(query || undefined, { limit: 200 });
       setDocs(data.items);
       setGaps(await api.listKnowledgeGaps());
       window.dispatchEvent(new Event("aikefu:knowledge-changed"));
@@ -219,13 +235,56 @@ export function KnowledgeWorkbench() {
         const isAdmin = isAdminRole(profile.user.role);
         setAdmin(isAdmin);
         if (!isAdmin) return;
-        return api.getKnowledgeIndexSettings().then((settings) => {
-          setIndexSettings(settings);
-          setIndexBaseline(settings);
-        });
+        return Promise.all([
+          api.getKnowledgeIndexSettings().then((settings) => {
+            setIndexSettings(settings);
+            setIndexBaseline(settings);
+          }),
+          api.getKnowledgeIndexHealth().then(setIndexHealth).catch(() => undefined),
+        ]);
       })
       .catch(() => undefined);
   }, []);
+
+  async function runRetrieve() {
+    const q = retrieveQuery.trim();
+    if (!q || retrieveBusy) return;
+    setRetrieveBusy(true);
+    try {
+      const result = await api.retrieveKnowledge(q, 5);
+      setRetrieveResult(result);
+      setIndexHealth(result.index);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "试检索失败");
+    } finally {
+      setRetrieveBusy(false);
+    }
+  }
+
+  async function runReindexMissing() {
+    if (reindexing) return;
+    if (
+      !window.confirm(
+        "将对已发布但缺少向量索引的文档补建索引。确定继续？",
+      )
+    ) {
+      return;
+    }
+    setReindexing(true);
+    try {
+      const result = await api.reindexMissingKnowledge();
+      setIndexHealth(result.index);
+      notify(
+        result.errors.length
+          ? `已补索引 ${result.indexedCount} 篇，失败 ${result.errors.length} 篇`
+          : `已补索引 ${result.indexedCount} 篇`,
+      );
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "补索引失败");
+    } finally {
+      setReindexing(false);
+    }
+  }
 
   useEffect(() => {
     const timer = window.setTimeout(() => setQuery(queryInput.trim()), 300);
@@ -271,9 +330,14 @@ export function KnowledgeWorkbench() {
   );
   const publishedCount = docs.filter((doc) => doc.status === "ready").length;
   const pendingCount = docs.filter((doc) => doc.status === "pending").length;
-  const openGapCount = gaps.filter(
-    (gap) => gap.status === "open" || gap.status === "in_progress",
-  ).length;
+  const activeGaps = useMemo(
+    () =>
+      gaps.filter(
+        (gap) => gap.status === "open" || gap.status === "in_progress",
+      ),
+    [gaps],
+  );
+  const openGapCount = activeGaps.length;
 
   const preferredTab = (() => {
     if (statusTabTouched || listLoading) return statusTab;
@@ -389,6 +453,18 @@ export function KnowledgeWorkbench() {
 
   async function handleSave() {
     const wasCreate = creating;
+    if (
+      admin &&
+      !wasCreate &&
+      (status === "ready" || status === "archived")
+    ) {
+      const ok = window.confirm(
+        status === "ready"
+          ? "保存后将退出已发布状态并清除检索索引，需重新发布后才会被回复引用。确定继续？"
+          : "保存后将变为草稿，需重新发布后才会被回复引用。确定继续？",
+      );
+      if (!ok) return;
+    }
     setBusy(true);
     try {
       const id = await saveDraft();
@@ -397,7 +473,7 @@ export function KnowledgeWorkbench() {
         notify(
           wasCreate ? "已保存为草稿" : "已保存修改。发布后才会进入检索",
         );
-        if (wasCreate) {
+        if (wasCreate || status === "ready" || status === "archived") {
           setStatusTabTouched(true);
           setStatusTab("draft");
         }
@@ -517,6 +593,7 @@ export function KnowledgeWorkbench() {
   }
 
   async function archiveRow(id: string) {
+    if (!window.confirm("下线后回复将不再引用此文章，确定下线？")) return;
     setBusy(true);
     try {
       await api.archiveKnowledge(id);
@@ -530,24 +607,74 @@ export function KnowledgeWorkbench() {
     }
   }
 
+  async function convertGap(id: string) {
+    if (gapBusyId) return;
+    setGapBusyId(id);
+    try {
+      await api.convertKnowledgeGapToFaq(id);
+      notify("已生成待审批 FAQ");
+      setStatusTabTouched(true);
+      setStatusTab("pending");
+      await load();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "创建 FAQ 失败");
+    } finally {
+      setGapBusyId(null);
+    }
+  }
+
+  async function ignoreGap(id: string) {
+    if (gapBusyId) return;
+    if (!window.confirm("忽略后将从待补充列表移除，确定忽略？")) return;
+    setGapBusyId(id);
+    try {
+      await api.updateKnowledgeGap(id, "ignored");
+      notify("已忽略该知识缺口");
+      await load();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "忽略失败");
+    } finally {
+      setGapBusyId(null);
+    }
+  }
+
   async function handleDelete(id?: string) {
     const targetId = id ?? selectedId;
     if (!targetId) return;
     if (!window.confirm("删除后不可恢复，确定删除这篇文章？")) return;
     setBusy(true);
+    let deleted = false;
     try {
       await api.deleteKnowledge(targetId);
-      if (selectedId === targetId) {
-        setDialog(null);
-        setSelectedId(null);
-        setCreating(false);
-        setBaseline(null);
-      }
-      notify("文章已删除");
-      await load();
+      deleted = true;
     } catch (err) {
-      notify(err instanceof Error ? err.message : "删除失败");
+      // 后端可能已删成功但返回空 body，旧客户端会把 JSON 解析失败当成错误。
+      const message = err instanceof Error ? err.message : "删除失败";
+      const looksLikeEmptyParse =
+        /unexpected end of json|json.parse|unexpected eof|failed to execute 'json'/i.test(
+          message,
+        );
+      const looksGone =
+        err instanceof Error &&
+        (("status" in err && (err as { status?: number }).status === 404) ||
+          /not found|未找到|不存在/i.test(message));
+      if (looksLikeEmptyParse || looksGone) {
+        deleted = true;
+      } else {
+        notify(message);
+      }
     } finally {
+      if (deleted) {
+        if (selectedId === targetId) {
+          setDialog(null);
+          setSelectedId(null);
+          setCreating(false);
+          setBaseline(null);
+        }
+        setDocs((prev) => prev.filter((doc) => doc.id !== targetId));
+        notify("文章已删除");
+        await load();
+      }
       setBusy(false);
     }
   }
@@ -643,6 +770,16 @@ export function KnowledgeWorkbench() {
           : "新建或上传后进入待审批，管理员批准后才会被检索。"}
         action={
           <div className="flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              disabled={busy}
+              onClick={() => {
+                setRetrieveResult(null);
+                setRetrieveOpen(true);
+              }}
+            >
+              试检索
+            </Button>
             {admin ? (
               <Button
                 variant="secondary"
@@ -650,6 +787,10 @@ export function KnowledgeWorkbench() {
                 onClick={() => {
                   setIndexSettings(indexBaseline);
                   setIndexOpen(true);
+                  void api
+                    .getKnowledgeIndexHealth()
+                    .then(setIndexHealth)
+                    .catch(() => undefined);
                 }}
               >
                 检索规则
@@ -670,6 +811,83 @@ export function KnowledgeWorkbench() {
       />
 
       <Modal
+        open={retrieveOpen}
+        title="试检索"
+        description="用客户口吻提问，查看当前已发布知识会被命中哪些条目（不生成回复）。"
+        onClose={() => setRetrieveOpen(false)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setRetrieveOpen(false)}>
+              关闭
+            </Button>
+            <Button
+              disabled={retrieveBusy || !retrieveQuery.trim()}
+              onClick={() => void runRetrieve()}
+            >
+              {retrieveBusy ? "检索中…" : "开始检索"}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <label className="block space-y-1 text-sm">
+            <span className="text-xs text-ink-soft">测试问题</span>
+            <input
+              value={retrieveQuery}
+              onChange={(e) => setRetrieveQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void runRetrieve();
+                }
+              }}
+              placeholder="例如：马克杯起订量是多少？"
+              className="w-full border border-line bg-paper px-3 py-2 text-sm outline-none focus:border-accent"
+            />
+          </label>
+          {retrieveResult ? (
+            <div className="space-y-3">
+              <p className="text-xs text-ink-soft">
+                模式{" "}
+                {retrieveResult.mode === "vector"
+                  ? "向量"
+                  : retrieveResult.mode === "lexical"
+                    ? "关键词"
+                    : "无命中"}
+                {" · "}
+                已发布 {retrieveResult.index.readyDocuments} · 已索引{" "}
+                {retrieveResult.index.indexedDocuments}
+                {retrieveResult.index.missingDocuments.length
+                  ? ` · 缺索引 ${retrieveResult.index.missingDocuments.length}`
+                  : ""}
+              </p>
+              {retrieveResult.hits.length ? (
+                <ul className="divide-y divide-line border border-line">
+                  {retrieveResult.hits.map((hit) => (
+                    <li key={`${hit.documentId}-${hit.score}`} className="px-3 py-2.5">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <p className="text-sm font-medium text-ink">{hit.title}</p>
+                        <span className="shrink-0 text-xs tabular-nums text-ink-soft">
+                          {hit.score.toFixed(2)}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs leading-relaxed text-ink-soft">
+                        {hit.excerpt}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-ink-soft">
+                  没有足够依据的命中。可检查文档是否已发布，或管理员是否需补建索引。
+                </p>
+              )}
+            </div>
+          ) : null}
+        </div>
+      </Modal>
+
+      <Modal
         open={indexOpen}
         title="检索索引规则"
         description="保存后对新发布或重新发布的文档生效。已发布文档需再点一次「发布」才会按新规则重建分段。"
@@ -681,7 +899,7 @@ export function KnowledgeWorkbench() {
           <>
             <Button
               variant="secondary"
-              disabled={indexSaving}
+              disabled={indexSaving || reindexing}
               onClick={() => {
                 setIndexSettings(indexBaseline);
                 setIndexOpen(false);
@@ -692,6 +910,7 @@ export function KnowledgeWorkbench() {
             <Button
               disabled={
                 indexSaving ||
+                reindexing ||
                 (indexSettings.chunkSize === indexBaseline.chunkSize &&
                   indexSettings.chunkOverlap === indexBaseline.chunkOverlap &&
                   indexSettings.maxChunksPerDoc ===
@@ -720,6 +939,36 @@ export function KnowledgeWorkbench() {
         }
       >
         <div className="space-y-4">
+          {indexHealth ? (
+            <div className="border border-line bg-surface/40 px-3 py-3 text-sm">
+              <p className="font-medium text-ink">索引健康</p>
+              <p className="mt-1 text-xs text-ink-soft">
+                Embedding：
+                {indexHealth.embedding === "api"
+                  ? `可用${indexHealth.embeddingModel ? `（${indexHealth.embeddingModel}）` : ""}`
+                  : indexHealth.embedding === "hash"
+                    ? "开发哈希回退"
+                    : "不可用（将仅关键词检索）"}
+              </p>
+              <p className="mt-1 text-xs text-ink-soft">
+                已发布 {indexHealth.readyDocuments} · 已索引{" "}
+                {indexHealth.indexedDocuments}
+                {indexHealth.missingDocuments.length
+                  ? ` · 缺索引 ${indexHealth.missingDocuments.length}`
+                  : ""}
+              </p>
+              {indexHealth.missingDocuments.length ? (
+                <Button
+                  variant="secondary"
+                  className="mt-3"
+                  disabled={reindexing}
+                  onClick={() => void runReindexMissing()}
+                >
+                  {reindexing ? "补索引中…" : "补建缺失索引"}
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
           <div className="grid gap-3 sm:grid-cols-3">
             <label className="space-y-1 text-sm">
               <span className="text-xs text-ink-soft">分段长度（字）</span>
@@ -912,13 +1161,50 @@ export function KnowledgeWorkbench() {
         </Button>
       </div>
 
-      {showGaps ? <section className="border border-line bg-paper">
-        <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
-          <p className="text-sm font-medium text-ink">待补充知识</p>
-          <span className="text-xs text-ink-soft">{gaps.length} 条记录</span>
-        </div>
-        {gaps.length ? <ul className="divide-y divide-line">{gaps.map((gap) => <li key={gap.id} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="text-sm text-ink">{gap.query}</p><p className="mt-1 text-xs text-ink-soft">{gap.contactName} · 出现 {gap.occurrences} 次 · 最近 {new Date(gap.lastSeenAt).toLocaleString()}</p></div><div className="flex shrink-0 gap-2"><Button variant="secondary" onClick={() => void api.convertKnowledgeGapToFaq(gap.id).then(() => { notify("已生成待审批 FAQ"); void load(); }).catch(() => notify("创建 FAQ 失败"))}>整理为 FAQ</Button><Button variant="ghost" onClick={() => void api.updateKnowledgeGap(gap.id, "ignored").then(() => void load())}>忽略</Button></div></li>)}</ul> : <p className="px-4 py-6 text-sm text-ink-soft">暂无待补充问题</p>}
-      </section> : null}
+      {showGaps ? (
+        <section className="border border-line bg-paper">
+          <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
+            <p className="text-sm font-medium text-ink">待补充知识</p>
+            <span className="text-xs text-ink-soft">{openGapCount} 条待处理</span>
+          </div>
+          {activeGaps.length ? (
+            <ul className="divide-y divide-line">
+              {activeGaps.map((gap) => (
+                <li
+                  key={gap.id}
+                  className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm text-ink">{gap.query}</p>
+                    <p className="mt-1 text-xs text-ink-soft">
+                      {gap.contactName} · 出现 {gap.occurrences} 次 · 最近{" "}
+                      {new Date(gap.lastSeenAt).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    <Button
+                      variant="secondary"
+                      disabled={gapBusyId !== null}
+                      onClick={() => void convertGap(gap.id)}
+                    >
+                      {gapBusyId === gap.id ? "处理中…" : "整理为 FAQ"}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      disabled={gapBusyId !== null}
+                      onClick={() => void ignoreGap(gap.id)}
+                    >
+                      忽略
+                    </Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="px-4 py-6 text-sm text-ink-soft">暂无待补充问题</p>
+          )}
+        </section>
+      ) : null}
 
       <section className="min-w-0 border border-line bg-paper">
       <div className="grid grid-cols-3 divide-x divide-line border-b border-line bg-surface/50">
@@ -1150,7 +1436,7 @@ export function KnowledgeWorkbench() {
               className="w-full border border-line bg-paper px-3 py-2 font-display text-xl text-ink outline-none focus:border-accent disabled:opacity-60"
             />
             <div className="flex flex-wrap items-center gap-2">
-              <span className="mr-2 text-xs text-ink-soft">项目知识库</span>
+              <span className="mr-2 text-xs text-ink-soft">文档类型</span>
               {(
                 [
                   ["faq", "FAQ"],
@@ -1243,6 +1529,10 @@ function DocList({
   onReject: (id: string) => void;
 }) {
   const [page, setPage] = useState(1);
+  const docsSignature = docs.map((doc) => doc.id).join(",");
+  useEffect(() => {
+    setPage(1);
+  }, [docsSignature]);
   const pages = Math.max(1, Math.ceil(docs.length / DOC_PAGE_SIZE));
   const current = Math.min(page, pages);
   const visible = docs.slice(

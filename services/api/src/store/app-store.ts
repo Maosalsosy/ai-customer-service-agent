@@ -116,7 +116,10 @@ export interface AppStore {
     tenantId: string,
     status?: ConversationStatus,
     q?: string,
-  ): Promise<{ items: Conversation[] }> | { items: Conversation[] };
+    opts?: { limit?: number; offset?: number },
+  ):
+    | Promise<{ items: Conversation[]; total: number }>
+    | { items: Conversation[]; total: number };
 
   getConversation(
     tenantId: string,
@@ -243,9 +246,10 @@ export interface AppStore {
     q?: string,
     categoryId?: string,
     knowledgeBaseId?: string,
-  ): Promise<{ items: Omit<KnowledgeDoc, 'body' | 'tenantId'>[] }> | {
-    items: Omit<KnowledgeDoc, 'body' | 'tenantId'>[];
-  };
+    opts?: { limit?: number; offset?: number; status?: DocStatus },
+  ):
+    | Promise<{ items: Omit<KnowledgeDoc, 'body' | 'tenantId'>[]; total: number }>
+    | { items: Omit<KnowledgeDoc, 'body' | 'tenantId'>[]; total: number };
 
   getKnowledge(tenantId: string, id: string): Promise<KnowledgeDoc> | KnowledgeDoc;
 
@@ -316,6 +320,7 @@ export interface AppStore {
   listKnowledgeCategories(tenantId: string, knowledgeBaseId: string): Promise<KnowledgeCategory[]> | KnowledgeCategory[];
   recordKnowledgeGap(input: { tenantId: string; conversationId: string; customerMessageId: string; query: string; knowledgeBaseId?: string }): Promise<void> | void;
   listKnowledgeGaps(tenantId: string): Promise<KnowledgeGap[]> | KnowledgeGap[];
+  getKnowledgeGap(tenantId: string, id: string): Promise<KnowledgeGap> | KnowledgeGap;
   updateKnowledgeGap(tenantId: string, id: string, status: KnowledgeGap['status']): Promise<KnowledgeGap> | KnowledgeGap;
 
   readyKnowledgeForRetrieve(tenantId: string, knowledgeBaseId?: string | string[]): Promise<
@@ -570,6 +575,26 @@ export interface AppStore {
   getTenant(tenantId: string): Promise<Tenant | null> | Tenant | null;
 
   setTenantAutoSendEnabled(tenantId: string, enabled: boolean): Promise<Tenant> | Tenant;
+
+  setTenantAutoSendSetting(
+    tenantId: string,
+    input: {
+      enabled?: boolean;
+      windowStart?: string | null;
+      windowEnd?: string | null;
+      timezone?: string | null;
+    },
+  ): Promise<Tenant> | Tenant;
+
+  setTenantAiReplyStyle(
+    tenantId: string,
+    input: {
+      tone?: string;
+      persona?: string;
+      systemPrompt?: string;
+      maxLength?: number;
+    },
+  ): Promise<Tenant> | Tenant;
 
   ensureUserPasswordHash(
     userId: string,

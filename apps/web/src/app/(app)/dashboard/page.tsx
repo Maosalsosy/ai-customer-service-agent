@@ -73,7 +73,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     void Promise.allSettled([api.autoSendSetting(), api.listAiProfiles()]).then(([sendResult, profileResult]) => {
-      if (sendResult.status === "fulfilled") setAutoSendEnabled(sendResult.value.enabled);
+      if (sendResult.status === "fulfilled") setAutoSendEnabled(sendResult.value.activeNow);
       if (profileResult.status === "fulfilled") {
         const active = profileResult.value.items.find((item) => item.active) ?? profileResult.value.items[0];
         setModelName(active ? `${active.provider} · ${active.model}` : null);
@@ -83,8 +83,8 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!admin) return;
-    queueMicrotask(() => void api.listKnowledge().then((docs) => {
-      setPendingKnowledge(docs.items.filter((doc) => doc.status === "pending").length);
+    queueMicrotask(() => void api.listKnowledge(undefined, { status: "pending", limit: 1 }).then((docs) => {
+      setPendingKnowledge(docs.total ?? docs.items.length);
     }).catch(() => setPendingKnowledge(null)));
   }, [admin]);
 
@@ -154,7 +154,7 @@ export default function DashboardPage() {
           </div>
           <div className="px-5 pb-4 pt-3">
             {loading && !data ? <p className="py-16 text-center text-sm text-ink-soft">加载趋势…</p> : data?.series.length ? <TrendBars series={data.series} metric={trendMetric} /> : <p className="py-16 text-center text-sm text-ink-soft">此时段暂无趋势数据</p>}
-            <p className="mt-3 text-[11px] text-ink-soft">{data?.notes ?? "趋势仅展示当前租户可用的真实统计数据。"}</p>
+            <p className="mt-3 text-[11px] text-ink-soft">{data?.notes ?? "趋势仅展示当前工作区可用的真实统计数据。"}</p>
           </div>
         </Panel>
 
@@ -182,7 +182,7 @@ export default function DashboardPage() {
             <p className="text-xs text-ink-soft">{item.label}</p><p className="mt-2 text-2xl font-semibold text-ink">{item.value}</p><p className="mt-2 text-[11px] text-ink-soft">{item.note}</p>
           </Panel>)}
         </div>
-        <p className="mt-3 text-[11px] leading-5 text-ink-soft">待办计数和趋势来自当前租户数据；未接入的数据项显示为 —，不以示例数据代替。</p>
+        <p className="mt-3 text-[11px] leading-5 text-ink-soft">待办计数和趋势来自当前工作区数据；未接入的数据项显示为 —，不以示例数据代替。</p>
       </section>
     </div>
   );

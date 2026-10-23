@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateReplyPolicy, findSensitiveKeywords } from './reply-policy.js';
+import {
+  chitchatReply,
+  evaluateReplyPolicy,
+  findSensitiveKeywords,
+  isChitchatMessage,
+} from './reply-policy.js';
 
 describe('reply-policy', () => {
   it('flags sensitive business keywords', () => {
@@ -29,5 +34,13 @@ describe('reply-policy', () => {
   it('scans across multiple turns', () => {
     const decision = evaluateReplyPolicy(['刚才那个问题', '还是要退款']);
     expect(decision.needsHuman).toBe(true);
+  });
+
+  it('detects chitchat and drafts a short reply', () => {
+    expect(isChitchatMessage('你好')).toBe(true);
+    expect(isChitchatMessage('谢谢')).toBe(true);
+    expect(isChitchatMessage('陶瓷杯起订量')).toBe(false);
+    expect(chitchatReply('你好')).toContain('客服助手');
+    expect(chitchatReply('谢谢')).toContain('有需要');
   });
 });

@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   Param,
   Patch,
   Post,
@@ -26,8 +27,49 @@ export class KnowledgeController {
 
   @Get('documents')
   @Roles('admin', 'agent')
-  list(@CurrentTenantId() tenantId: string, @Query('q') q?: string, @Query('categoryId') categoryId?: string, @Query('knowledgeBaseId') knowledgeBaseId?: string) {
-    return this.knowledge.list(tenantId, q, categoryId, knowledgeBaseId);
+  list(
+    @CurrentTenantId() tenantId: string,
+    @Query('q') q?: string,
+    @Query('categoryId') categoryId?: string,
+    @Query('knowledgeBaseId') knowledgeBaseId?: string,
+    @Query('status') status?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.knowledge.list(tenantId, q, categoryId, knowledgeBaseId, {
+      status,
+      limit: limit != null ? Number(limit) : undefined,
+      offset: offset != null ? Number(offset) : undefined,
+    });
+  }
+
+  @Get('retrieve')
+  @Roles('admin', 'agent')
+  retrieve(
+    @CurrentTenantId() tenantId: string,
+    @Query('q') q?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.knowledge.probeRetrieve(
+      tenantId,
+      q ?? '',
+      limit != null ? Number(limit) : 5,
+    );
+  }
+
+  @Get('index-health')
+  @Roles('admin')
+  indexHealth(@CurrentTenantId() tenantId: string) {
+    return this.knowledge.getIndexHealth(tenantId);
+  }
+
+  @Post('reindex-missing')
+  @Roles('admin')
+  reindexMissing(
+    @CurrentTenantId() tenantId: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.knowledge.reindexMissing(tenantId, user.id);
   }
 
   @Get('bases')
@@ -95,14 +137,21 @@ export class KnowledgeController {
     @CurrentTenantId() tenantId: string,
     @CurrentUser() user: User,
     @Body()
-    body: { title: string; sourceType?: 'faq' | 'markdown'; body: string; categoryId?: string | null; knowledgeBaseId?: string },
+    body: {
+      title: string;
+      sourceType?: 'faq' | 'markdown';
+      body?: string;
+      content?: string;
+      categoryId?: string | null;
+      knowledgeBaseId?: string;
+    },
   ) {
     return this.knowledge.create(
       tenantId,
       {
         title: body.title,
         sourceType: body.sourceType ?? 'faq',
-        body: body.body,
+        body: body.body ?? body.content ?? '',
         categoryId: body.categoryId,
         knowledgeBaseId: body.knowledgeBaseId,
       },
@@ -171,7 +220,14 @@ export class KnowledgeController {
     @CurrentUser() user: User,
     @Param('id') id: string,
     @Body()
-    body: { title: string; sourceType?: 'faq' | 'markdown'; body: string; categoryId?: string | null; knowledgeBaseId?: string },
+    body: {
+      title: string;
+      sourceType?: 'faq' | 'markdown';
+      body?: string;
+      content?: string;
+      categoryId?: string | null;
+      knowledgeBaseId?: string;
+    },
   ) {
     return this.knowledge.update(
       tenantId,
@@ -179,7 +235,7 @@ export class KnowledgeController {
       {
         title: body.title,
         sourceType: body.sourceType ?? 'faq',
-        body: body.body,
+        body: body.body ?? body.content ?? '',
         categoryId: body.categoryId,
         knowledgeBaseId: body.knowledgeBaseId,
       },
@@ -198,13 +254,14 @@ export class KnowledgeController {
   }
 
   @Delete('documents/:id')
+  @HttpCode(204)
   @Roles('admin', 'agent')
-  remove(
+  async remove(
     @CurrentTenantId() tenantId: string,
     @CurrentUser() user: User,
     @Param('id') id: string,
   ) {
-    return this.knowledge.remove(tenantId, id, {
+    await this.knowledge.remove(tenantId, id, {
       id: user.id,
       role: user.role,
     });

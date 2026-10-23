@@ -123,8 +123,8 @@ export function hybridScore(vector: number | null, lexicalRaw: number): number {
   return 0.62 * Math.max(0, vector) + 0.38 * lex;
 }
 
-/** 从命中词附近截引用，避免整段开头与问题无关。 */
-export function excerptAround(text: string, query: string, max = 160): string {
+/** 从命中词附近截引用，避免整段开头与问题无关。默认加长以便模型看到完整 FAQ/政策。 */
+export function excerptAround(text: string, query: string, max = 600): string {
   const clean = text.replace(/\s+/g, ' ').trim();
   if (clean.length <= max) return clean;
   const terms = extractTerms(query).sort((a, b) => b.length - a.length);
@@ -198,7 +198,7 @@ export function rankKnowledgeHits(
       return {
         documentId: doc.id,
         title: doc.title,
-        excerpt: excerptAround(doc.body || doc.excerpt, query, 120),
+        excerpt: excerptAround(doc.body || doc.excerpt, query, 400),
         score: lexicalScore(query, doc.title, body),
       };
     })

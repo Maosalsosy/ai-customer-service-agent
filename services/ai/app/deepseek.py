@@ -119,23 +119,40 @@ def generate_with_deepseek(req: ReplyDraftRequest) -> ReplyDraftResponse:
     if hits and req.policy.requireCitations:
         grounding = (
             "已提供知识片段时，只根据这些片段回答，不要编造片段里没有的价格、交期、政策或承诺。"
+            "信息不足时可简短追问一个关键信息（如数量、用途），不要连续追问。"
             "draft_ready 时 citationDocumentIds 至少包含一个知识片段 id，且只能使用片段里出现过的 id。"
         )
     else:
         grounding = (
-            "没有知识片段时，不要尝试回答业务问题；明确表示需要人工核实。"
+            "没有知识片段时：若客户最新消息是寒暄、致谢或与业务无关的闲聊，可用一句简短礼貌回复，status 为 draft_ready，citationDocumentIds 为空。"
+            "若是具体业务问题，明确表示需要人工核实，status 必须为 needs_human，citationDocumentIds 必须为空。"
             "不要编造该企业的价格、交期、合同或内部政策，也不要假装引用了内部文档。"
-            "status 必须为 needs_human，citationDocumentIds 必须为空。"
         )
+    tone = (req.policy.tone or "direct").strip().lower()
+    if tone == "warm":
+        tone_line = "语气亲切温和，可适当礼貌用语，但仍保持简洁。"
+    elif tone == "formal":
+        tone_line = "语气正式庄重，用书面语，避免口语化。"
+    else:
+        tone_line = "语气直接简洁，少客套，先给结论。"
+    persona = (req.policy.persona or "").strip()
+    role_line = f"你是{persona}。" if persona else "你是企业客服。"
+    extra = (req.policy.systemPrompt or "").strip()
+    extra_line = f"补充指令：{extra}" if extra else ""
     system = (
-        "你是客服。直接回答，不要寒暄、开场白、结尾客套，也不要主动追问数量或印制要求。"
+        f"{role_line}"
+        "回答自然、专业，不要套话连篇。"
+        f"{tone_line}"
+        "可以一句简短回应寒暄或致谢；回答业务问题时直接给结论，必要时再补一句说明。"
+        "信息不足时允许追问一个关键澄清问题；不要主动推销或编造未提供的承诺。"
         "是否转人工只看客户最新一条消息是否涉及退款、赔偿、改价或投诉，不要因为更早的历史转人工。"
         f"{grounding}"
+        f"{extra_line}"
         "只返回 JSON："
         '{"status":"draft_ready|needs_human","draft":"回复正文","citationDocumentIds":["id"],"reason":"可选原因"}'
     )
     user = (
-        f"语气：直接陈述，不要客套。\n"
+        f"语气要求：{tone_line}\n"
         f"长度上限：{req.policy.maxLength} 字\n"
         f"近期对话：\n{history or '（无）'}\n"
         f"客户最新消息：{req.customerMessage}\n"

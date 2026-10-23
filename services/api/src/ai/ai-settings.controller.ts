@@ -47,18 +47,44 @@ export class AiSettingsController {
 
   @Get('settings/auto-send')
   @Roles('admin', 'agent')
-  async autoSend(@CurrentTenantId() tenantId: string) {
-    const tenant = await this.settings.getAutoSendSetting(tenantId);
-    return { enabled: tenant.autoSendEnabled };
+  autoSend(@CurrentTenantId() tenantId: string) {
+    return this.settings.getAutoSendSetting(tenantId);
   }
 
   @Put('settings/auto-send')
   @Roles('admin')
   setAutoSend(
     @CurrentTenantId() tenantId: string,
-    @Body() body: { enabled?: boolean },
+    @Body()
+    body: {
+      enabled?: boolean;
+      windowStart?: string | null;
+      windowEnd?: string | null;
+      timezone?: string | null;
+    },
   ) {
-    return this.settings.setAutoSendSetting(tenantId, body?.enabled);
+    return this.settings.setAutoSendSetting(tenantId, body ?? {});
+  }
+
+  @Get('settings/reply-style')
+  @Roles('admin', 'agent')
+  replyStyle(@CurrentTenantId() tenantId: string) {
+    return this.settings.getReplyStyle(tenantId);
+  }
+
+  @Put('settings/reply-style')
+  @Roles('admin')
+  setReplyStyle(
+    @CurrentTenantId() tenantId: string,
+    @Body()
+    body: {
+      tone?: string;
+      persona?: string;
+      systemPrompt?: string;
+      maxLength?: number;
+    },
+  ) {
+    return this.settings.setReplyStyle(tenantId, body ?? {});
   }
 
   @Post('settings')

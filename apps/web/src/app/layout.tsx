@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "AI客服",
-  description: "面向微信客服团队的企业级 AI 客服工作台",
+  description: "面向单一企业微信客服团队的 AI 客服工作区",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

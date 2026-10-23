@@ -9,7 +9,12 @@ import {
 import { AuditService } from '../audit/audit.service.js';
 import { AiClientService } from '../ai/ai-client.service.js';
 import { AiSettingsService } from '../ai/ai-settings.service.js';
-import { evaluateReplyPolicy } from '../common/reply-policy.js';
+import { tenantAllowsAutoSendNow } from '../common/auto-send-window.js';
+import {
+  chitchatReply,
+  evaluateReplyPolicy,
+  isChitchatMessage,
+} from '../common/reply-policy.js';
 import { RealtimeService } from '../events/realtime.service.js';
 import { KnowledgeService } from '../knowledge/knowledge.service.js';
 import { buildRetrieveQuery } from '../knowledge/knowledge-retrieve.js';
@@ -45,8 +50,13 @@ export class ConversationsService implements OnModuleInit, OnModuleDestroy {
     if (this.autoDraftTimer) clearInterval(this.autoDraftTimer);
   }
 
-  list(tenantId: string, status?: ConversationStatus, q?: string) {
-    return this.store.listConversations(tenantId, status, q);
+  list(
+    tenantId: string,
+    status?: ConversationStatus,
+    q?: string,
+    opts?: { limit?: number; offset?: number },
+  ) {
+    return this.store.listConversations(tenantId, status, q, opts);
   }
 
   get(tenantId: string, id: string) {
@@ -59,7 +69,7 @@ export class ConversationsService implements OnModuleInit, OnModuleDestroy {
 
   async defaultContactPolicy(tenantId: string) {
     const tenant = await this.store.getTenant(tenantId);
-    if (!tenant) throw new BadRequestException('租户不存在');
+    if (!tenant) throw new BadRequestException('工作区不存在');
     return { policy: tenant.defaultContactPolicy };
   }
 
@@ -487,7 +497,9 @@ export class ConversationsService implements OnModuleInit, OnModuleDestroy {
       return null;
     }
     const allowEscalate = conversation.handlingMode !== 'human';
-    const allowAutoSend = Boolean(options?.automatic && tenant?.autoSendEnabled);
+    const allowAutoSend = Boolean(
+      options?.automatic && tenant && tenantAllowsAutoSendNow(tenant),
+    );
     const context = await this.conversationContext(tenantId, conversationId);
     this.audit.record({
       tenantId,
@@ -538,6 +550,17 @@ export class ConversationsService implements OnModuleInit, OnModuleDestroy {
     };
 
     if (!hits.length) {
+      if (isChitchatMessage(lastCustomer)) {
+        return this.persistDraft(tenantId, conversationId, {
+          content: chitchatReply(lastCustomer),
+          status: 'pending',
+          reason: 'chitchat_no_knowledge',
+          citations: [],
+          model: { provider: 'local-rule', name: 'chitchat-v1' },
+          autoSend: allowAutoSend,
+          answerToMessageId: unanswered?.id,
+        });
+      }
       const customerMessage = [...(await this.store.messages(tenantId, conversationId)).items].reverse().find((message) => message.sender === 'customer' && message.content === lastCustomer);
       if (customerMessage) await this.store.recordKnowledgeGap({ tenantId, conversationId, customerMessageId: customerMessage.id, query: customerMessage.content });
       return saveNeedsHuman(
@@ -552,6 +575,12 @@ export class ConversationsService implements OnModuleInit, OnModuleDestroy {
       customerMessage: lastCustomer,
       conversationContext: context,
       knowledgeHits: hits,
+      policy: {
+        tone: tenant?.aiTone ?? 'direct',
+        maxLength: tenant?.aiMaxLength ?? 500,
+        persona: tenant?.aiPersona ?? '',
+        systemPrompt: tenant?.aiSystemPrompt ?? '',
+      },
       provider: await this.aiSettings.credentials(
         tenantId,
         options?.profileId,
@@ -594,8 +623,10 @@ export class ConversationsService implements OnModuleInit, OnModuleDestroy {
             ? '未检索到知识依据，需人工核实后发送'
             : modelReady && fromModel && missingCitation
               ? '模型回复缺少知识引用，需人工确认'
-              : modelReady && options?.automatic && !tenant?.autoSendEnabled
-                ? '租户自动发送已暂停，待客服审核后发送'
+              : modelReady && options?.automatic && tenant && !tenantAllowsAutoSendNow(tenant)
+                ? tenant.autoSendEnabled
+                  ? '当前不在自动发送时段，待客服审核后发送'
+                  : '工作区自动发送已暂停，待客服审核后发送'
                 : modelReady && !options?.automatic
                 ? '本次为手动生成，待客服审核后发送'
                 : modelReady && !fromModel
@@ -666,7 +697,8 @@ export class ConversationsService implements OnModuleInit, OnModuleDestroy {
         !input.answerToMessageId ||
         stillUnanswered?.id === input.answerToMessageId;
       if (
-        tenant?.autoSendEnabled &&
+        tenant &&
+        tenantAllowsAutoSendNow(tenant) &&
         conversation.handlingMode === 'ai' &&
         conversation.contactPolicy === 'ai' &&
         stillUnanswered &&

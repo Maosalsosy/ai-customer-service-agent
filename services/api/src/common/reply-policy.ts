@@ -53,3 +53,51 @@ export function evaluateReplyPolicy(texts: string[]): PolicyDecision {
 
   return { needsHuman: false, flags: [] };
 }
+
+const CHITCHAT_EXACT = new Set([
+  '你好',
+  '您好',
+  '在吗',
+  '在嘛',
+  '嗨',
+  'hi',
+  'hello',
+  '早上好',
+  '下午好',
+  '晚上好',
+  '谢谢',
+  '谢谢你',
+  '谢谢您',
+  '感谢',
+  '多谢',
+  '好的',
+  '好的谢谢',
+  '收到',
+  '嗯',
+  'ok',
+]);
+
+/** 寒暄/致谢：无知识命中时允许短回复，不必一律转人工。 */
+export function isChitchatMessage(text: string): boolean {
+  const normalized = text
+    .trim()
+    .toLowerCase()
+    .replace(/[！!。.?？~～]+$/g, '');
+  if (!normalized) return false;
+  if (CHITCHAT_EXACT.has(normalized)) return true;
+  if (
+    normalized.length <= 8 &&
+    ['你好', '您好', '谢谢', '感谢', '好的'].some((p) => normalized.startsWith(p))
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function chitchatReply(text: string): string {
+  const t = text.trim();
+  if (/^(你好|您好|在吗|在嘛|嗨|hi|hello)/i.test(t)) {
+    return '您好，我是客服助手，请问有什么可以帮您？';
+  }
+  return '好的，有需要随时告诉我。';
+}

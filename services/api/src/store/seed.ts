@@ -13,7 +13,14 @@ export const DEMO_TENANT: Tenant = {
   name: '杭州云帆企业礼品有限公司',
   slug: 'yunfan-gifts',
   autoSendEnabled: true,
+  autoSendWindowStart: null,
+  autoSendWindowEnd: null,
+  autoSendTimezone: 'Asia/Shanghai',
   defaultContactPolicy: 'ai',
+  aiTone: 'direct',
+  aiPersona: '云帆礼品客服',
+  aiSystemPrompt: '',
+  aiMaxLength: 500,
 };
 
 /** 演示知识库主文档标题。已有库若不是这篇，启动时会换成企业礼品售前内容。 */

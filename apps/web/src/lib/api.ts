@@ -80,10 +80,15 @@ async function request<T>(path: string, init?: RequestOptions): Promise<T> {
     throw new ApiError(res.status, code, message, requestId);
   }
 
+  // Nest void/DELETE 常返回 200 + 空 body；204 也无实体。
   if (res.status === 204) {
     return undefined as T;
   }
-  return (await res.json()) as T;
+  const text = await res.text();
+  if (!text.trim()) {
+    return undefined as T;
+  }
+  return JSON.parse(text) as T;
 }
 
 export type ApiConversation = {
@@ -150,9 +155,29 @@ export type ApiKnowledgeDoc = {
   knowledgeBaseId?: string;
 };
 
-export type ApiKnowledgeCategory = { id: string; tenantId: string; name: string; sortOrder: number; documentCount?: number };
-export type ApiKnowledgeBase = { id: string; tenantId: string; name: string; isDefault: boolean; documentCount?: number; connectionCount?: number };
 export type ApiKnowledgeGap = { id: string; tenantId: string; conversationId: string; customerMessageId: string; query: string; status: 'open' | 'in_progress' | 'resolved' | 'ignored'; occurrences: number; firstSeenAt: string; lastSeenAt: string; contactName: string };
+
+export type ApiKnowledgeHit = {
+  documentId: string;
+  title: string;
+  excerpt: string;
+  score: number;
+};
+
+export type ApiKnowledgeRetrieveResult = {
+  query: string;
+  hits: ApiKnowledgeHit[];
+  mode: "vector" | "lexical" | "none";
+  index: ApiKnowledgeIndexHealth;
+};
+
+export type ApiKnowledgeIndexHealth = {
+  readyDocuments: number;
+  indexedDocuments: number;
+  missingDocuments: { id: string; title: string }[];
+  embedding: "api" | "hash" | "down";
+  embeddingModel: string | null;
+};
 
 export type ApiWecomConnection = {
   id: string;
@@ -217,7 +242,21 @@ export type AiSettingsPayload = {
   activeId: string | null;
 };
 
-export type AutoSendSetting = { enabled: boolean };
+export type AutoSendSetting = {
+  enabled: boolean;
+  windowStart: string | null;
+  windowEnd: string | null;
+  timezone: string;
+  inWindow: boolean;
+  activeNow: boolean;
+};
+
+export type AiReplyStyle = {
+  tone: "direct" | "warm" | "formal";
+  persona: string;
+  systemPrompt: string;
+  maxLength: number;
+};
 
 export type AiEvaluationReport = {
   model: { name: string; model: string } | null;
@@ -364,12 +403,19 @@ export const api = {
     return result;
   },
 
-  listConversations: (params?: { status?: string; q?: string }) => {
+  listConversations: (params?: {
+    status?: string;
+    q?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
     const qs = new URLSearchParams();
     if (params?.status) qs.set("status", params.status);
     if (params?.q) qs.set("q", params.q);
+    if (params?.limit != null) qs.set("limit", String(params.limit));
+    if (params?.offset != null) qs.set("offset", String(params.offset));
     const suffix = qs.toString() ? `?${qs}` : "";
-    return request<{ items: ApiConversation[] }>(
+    return request<{ items: ApiConversation[]; total: number }>(
       `/api/v1/conversations${suffix}`,
     );
   },
@@ -491,25 +537,43 @@ export const api = {
       body: JSON.stringify({ content }),
     }),
 
-  listKnowledge: (q?: string, categoryId?: string, knowledgeBaseId?: string) => {
+  listKnowledge: (
+    q?: string,
+    opts?: {
+      status?: ApiKnowledgeDoc["status"];
+      limit?: number;
+      offset?: number;
+    },
+  ) => {
     const params = new URLSearchParams();
-    if (q) params.set('q', q);
-    if (categoryId) params.set('categoryId', categoryId);
-    if (knowledgeBaseId) params.set('knowledgeBaseId', knowledgeBaseId);
+    if (q) params.set("q", q);
+    if (opts?.status) params.set("status", opts.status);
+    if (opts?.limit != null) params.set("limit", String(opts.limit));
+    if (opts?.offset != null) params.set("offset", String(opts.offset));
     const suffix = params.size ? `?${params}` : "";
-    return request<{ items: ApiKnowledgeDoc[] }>(
+    return request<{ items: ApiKnowledgeDoc[]; total: number }>(
       `/api/v1/knowledge/documents${suffix}`,
     );
   },
 
-  listKnowledgeBases: () => request<ApiKnowledgeBase[]>('/api/v1/knowledge/bases'),
-  createKnowledgeBase: (name: string) => request<ApiKnowledgeBase>('/api/v1/knowledge/bases', { method: 'POST', body: JSON.stringify({ name }) }),
-  updateKnowledgeBase: (id: string, name: string) => request<ApiKnowledgeBase>(`/api/v1/knowledge/bases/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
-  deleteKnowledgeBase: (id: string) => request<void>(`/api/v1/knowledge/bases/${id}`, { method: 'DELETE' }),
-  listKnowledgeCategories: (knowledgeBaseId?: string) => request<ApiKnowledgeCategory[]>(`/api/v1/knowledge/categories${knowledgeBaseId ? `?knowledgeBaseId=${encodeURIComponent(knowledgeBaseId)}` : ''}`),
-  listKnowledgeGaps: () => request<ApiKnowledgeGap[]>('/api/v1/knowledge/gaps'),
-  updateKnowledgeGap: (id: string, status: ApiKnowledgeGap['status']) => request<ApiKnowledgeGap>(`/api/v1/knowledge/gaps/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
-  convertKnowledgeGapToFaq: (id: string) => request<ApiKnowledgeDoc>(`/api/v1/knowledge/gaps/${id}/faq`, { method: 'POST', body: '{}' }),
+  retrieveKnowledge: (q: string, limit = 5) => {
+    const params = new URLSearchParams({ q, limit: String(limit) });
+    return request<ApiKnowledgeRetrieveResult>(
+      `/api/v1/knowledge/retrieve?${params}`,
+    );
+  },
+
+  listKnowledgeGaps: () => request<ApiKnowledgeGap[]>("/api/v1/knowledge/gaps"),
+  updateKnowledgeGap: (id: string, status: ApiKnowledgeGap["status"]) =>
+    request<ApiKnowledgeGap>(`/api/v1/knowledge/gaps/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
+  convertKnowledgeGapToFaq: (id: string) =>
+    request<ApiKnowledgeDoc>(`/api/v1/knowledge/gaps/${id}/faq`, {
+      method: "POST",
+      body: "{}",
+    }),
 
   getKnowledgeIndexSettings: () =>
     request<{
@@ -517,6 +581,19 @@ export const api = {
       chunkOverlap: number;
       maxChunksPerDoc: number;
     }>("/api/v1/knowledge/index-settings"),
+
+  getKnowledgeIndexHealth: () =>
+    request<ApiKnowledgeIndexHealth>("/api/v1/knowledge/index-health"),
+
+  reindexMissingKnowledge: () =>
+    request<{
+      indexedCount: number;
+      errors: { documentId: string; message: string }[];
+      index: ApiKnowledgeIndexHealth;
+    }>("/api/v1/knowledge/reindex-missing", {
+      method: "POST",
+      body: "{}",
+    }),
 
   updateKnowledgeIndexSettings: (input: {
     chunkSize: number;
@@ -662,10 +739,23 @@ export const api = {
   autoSendSetting: () =>
     request<AutoSendSetting>("/api/v1/ai/settings/auto-send"),
 
-  setAutoSendSetting: (enabled: boolean) =>
+  setAutoSendSetting: (input: {
+    enabled?: boolean;
+    windowStart?: string | null;
+    windowEnd?: string | null;
+    timezone?: string | null;
+  }) =>
     request<AutoSendSetting>("/api/v1/ai/settings/auto-send", {
       method: "PUT",
-      body: JSON.stringify({ enabled }),
+      body: JSON.stringify(input),
+    }),
+
+  replyStyle: () => request<AiReplyStyle>("/api/v1/ai/settings/reply-style"),
+
+  setReplyStyle: (input: Partial<AiReplyStyle>) =>
+    request<AiReplyStyle>("/api/v1/ai/settings/reply-style", {
+      method: "PUT",
+      body: JSON.stringify(input),
     }),
 
   createAiProfile: (input: AiProfileInput) =>

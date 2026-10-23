@@ -104,7 +104,7 @@ export default function MembersPage() {
     <div className="animate-rise space-y-4">
       <PageHeader
         title="成员管理"
-        description="管理当前租户的成员、角色和访问权限。"
+        description="管理当前工作区的成员、角色和访问权限。"
         action={
           <Button type="button" onClick={() => setInviteOpen(true)}>
             邀请成员
@@ -136,7 +136,7 @@ export default function MembersPage() {
           {loading ? (
             <EmptyState title="加载中" description="正在拉取成员列表…" />
           ) : items.length === 0 ? (
-            <EmptyState title="暂无成员" description="点右上角邀请同事加入当前租户。" />
+            <EmptyState title="暂无成员" description="点右上角邀请同事加入当前工作区。" />
           ) : visibleItems.length === 0 ? (
             <EmptyState title="没有匹配的成员" description="调整姓名、邮箱或角色筛选条件。" />
           ) : (
@@ -179,7 +179,7 @@ export default function MembersPage() {
       <Modal
         open={inviteOpen}
         title="邀请成员"
-        description="邀请只加入当前租户。"
+        description="邀请只加入当前工作区。"
         onClose={() => setInviteOpen(false)}
         footer={
           <>

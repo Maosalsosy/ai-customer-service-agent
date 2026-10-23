@@ -136,7 +136,7 @@ export class MemoryStore {
     apiKey: string;
     active: boolean;
   }[] = [];
-  /** 内存模式下的账号与租户成员（演示可邀请）。 */
+  /** 内存模式下的账号与工作区成员（演示可邀请）。 */
   accounts: {
     id: string;
     email: string;

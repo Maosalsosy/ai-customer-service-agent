@@ -12,6 +12,8 @@ class ReplyPolicy(BaseModel):
     tone: str = "direct"
     maxLength: int = Field(default=500, ge=50, le=2000)
     requireCitations: bool = False
+    persona: str = ""
+    systemPrompt: str = ""
 
 
 class Citation(BaseModel):

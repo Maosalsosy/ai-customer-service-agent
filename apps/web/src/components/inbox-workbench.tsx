@@ -80,6 +80,7 @@ export function InboxWorkbench() {
       const data = await api.listConversations({
         status: statusFilter === "all" ? undefined : statusFilter,
         q: query.trim() || undefined,
+        limit: 100,
       });
       setList(data.items);
       setApiOnline(true);
@@ -146,7 +147,7 @@ export function InboxWorkbench() {
   useEffect(() => {
     void api
       .autoSendSetting()
-      .then((setting) => setAutoSendEnabled(setting.enabled))
+      .then((setting) => setAutoSendEnabled(setting.activeNow))
       .catch(() => setAutoSendEnabled(null));
   }, []);
 
@@ -179,7 +180,7 @@ export function InboxWorkbench() {
     }
   }, [selectedId, loadDetail]);
 
-  // 租户 SSE：与选中会话解耦；断线后换票重连
+  // 工作区 SSE：与选中会话解耦；断线后换票重连
   useEffect(() => {
     let es: EventSource | null = null;
     let cancelled = false;

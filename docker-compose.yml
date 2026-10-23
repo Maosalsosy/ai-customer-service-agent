@@ -68,6 +68,9 @@ services:
       DATABASE_URL: ${API_DATABASE_URL:-postgresql://${POSTGRES_USER:-aikefu}:${POSTGRES_PASSWORD:-aikefu}@postgres:5432/${POSTGRES_DB:-aikefu}?schema=public}
       AI_SERVICE_URL: http://ai:8000
       AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:-dev-ai-token}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
       AUTH_SECRET: ${AUTH_SECRET:-dev-auth-secret-change-me}
       AI_KEY_SECRET: ${AI_KEY_SECRET:-}
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}

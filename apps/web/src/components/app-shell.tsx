@@ -117,12 +117,10 @@ export function AppShell({ children }: { children: ReactNode }) {
     let cancelled = false;
     function refreshPending() {
       void api
-        .listKnowledge()
+        .listKnowledge(undefined, { status: "pending", limit: 200 })
         .then((data) => {
           if (cancelled) return;
-          setPendingKnowledge(
-            data.items.filter((doc) => doc.status === "pending").length,
-          );
+          setPendingKnowledge(data.total ?? data.items.length);
         })
         .catch(() => {
           if (!cancelled) setPendingKnowledge(0);
@@ -144,7 +142,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   const tenantName =
-    tenants.find((item) => item.id === currentTenantId)?.name ?? "租户";
+    tenants.find((item) => item.id === currentTenantId)?.name ?? "工作区";
   const role = roleLabel(user?.role);
   function logout() {
     clearAuthSession("staff");
@@ -270,7 +268,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 {tenants.length > 1 ? (
                   <div className="border-b border-line px-3 py-3">
                     <label className="block text-[11px] text-ink-soft">
-                      切换租户
+                      切换工作区
                       <select
                         value={currentTenantId}
                         onChange={(event) =>

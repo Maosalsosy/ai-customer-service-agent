@@ -37,12 +37,22 @@ export type WecomCapability =
   | 'customer_contact'
   | 'wechat_kf';
 
+export type AiReplyTone = 'direct' | 'warm' | 'formal';
+
 export interface Tenant {
   id: string;
   name: string;
   slug: string;
   autoSendEnabled: boolean;
+  /** HH:mm，空表示不限制时段 */
+  autoSendWindowStart: string | null;
+  autoSendWindowEnd: string | null;
+  autoSendTimezone: string;
   defaultContactPolicy: ContactPolicy;
+  aiTone: AiReplyTone;
+  aiPersona: string;
+  aiSystemPrompt: string;
+  aiMaxLength: number;
 }
 
 export interface ExternalContact {

@@ -48,7 +48,7 @@ export class AuthService implements OnModuleInit {
     const memberships = await this.store.listMemberships(user.id);
     const current = memberships.find((item) => item.tenant.id === tenantId);
     if (!current) {
-      throw new UnauthorizedException('当前租户成员关系已失效');
+      throw new UnauthorizedException('当前工作区成员关系已失效');
     }
     return {
       user: {
@@ -66,7 +66,7 @@ export class AuthService implements OnModuleInit {
     const memberships = await this.store.listMemberships(user.id);
     const current = memberships.find((item) => item.tenant.id === tenantId);
     if (!current) {
-      throw new ForbiddenException('无权切换到该租户');
+      throw new ForbiddenException('无权切换到该工作区');
     }
     return this.issueSession(
       { ...user, tenantId: current.tenant.id, role: current.role },
@@ -84,7 +84,7 @@ export class AuthService implements OnModuleInit {
   ) {
     const current = memberships.find((item) => item.tenant.id === tenantId);
     if (!current) {
-      throw new UnauthorizedException('当前租户成员关系已失效');
+      throw new UnauthorizedException('当前工作区成员关系已失效');
     }
     const role = normalizeRole(current.role);
     const token = signAuthToken({

@@ -6,6 +6,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import { tenantAllowsAutoSendNow } from '../common/auto-send-window.js';
 import { APP_STORE, type AppStore } from '../store/app-store.js';
 import type { AutoSendGuard } from '../store/types.js';
 import { RedisService } from '../common/redis.service.js';
@@ -126,7 +127,8 @@ export class WecomDispatchService implements OnModuleInit, OnModuleDestroy {
         prepared.messageId,
       );
       const current = Boolean(
-        tenant?.autoSendEnabled &&
+        tenant &&
+        tenantAllowsAutoSendNow(tenant) &&
         conversation.contactPolicy === 'ai' &&
         conversation.handlingMode === 'ai' &&
         latestInteraction?.sender === 'customer' &&

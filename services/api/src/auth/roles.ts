@@ -22,6 +22,7 @@ export function normalizeRole(role: string | undefined | null): AppRole {
     lower === 'admin' ||
     lower === 'owner' ||
     raw === '管理员' ||
+    raw === '工作区管理员' ||
     raw === '租户管理员'
   ) {
     return 'admin';

@@ -16,9 +16,9 @@ export const docStatusLabel: Record<DocStatus, string> = {
   pending: "待审批",
   rejected: "已驳回",
   processing: "处理中",
-  ready: "可用",
+  ready: "已发布",
   failed: "失败",
-  archived: "已归档",
+  archived: "已下线",
 };
 
 export const wecomStatusLabel: Record<WecomStatus, string> = {

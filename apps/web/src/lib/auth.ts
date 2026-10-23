@@ -76,6 +76,7 @@ export function isAdminRole(role?: string) {
     lower === "admin" ||
     lower === "owner" ||
     raw === "管理员" ||
+    raw === "工作区管理员" ||
     raw === "租户管理员"
   );
 }

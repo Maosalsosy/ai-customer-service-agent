@@ -6,6 +6,11 @@ import {
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import {
+  isWithinAutoSendWindow,
+  parseHhMm,
+  tenantAllowsAutoSendNow,
+} from '../common/auto-send-window.js';
+import {
   decryptSecret,
   encryptSecret,
   isEncryptedSecret,
@@ -54,16 +59,157 @@ export class AiSettingsService {
 
   async getAutoSendSetting(tenantId: string) {
     const tenant = await this.store.getTenant(tenantId);
-    if (!tenant) throw new NotFoundException('租户不存在');
-    return tenant;
+    if (!tenant) throw new NotFoundException('工作区不存在');
+    return this.toAutoSendView(tenant);
   }
 
-  async setAutoSendSetting(tenantId: string, enabled?: boolean) {
-    if (typeof enabled !== 'boolean') {
-      throw new BadRequestException('enabled 必须为布尔值');
+  async setAutoSendSetting(
+    tenantId: string,
+    input: {
+      enabled?: boolean;
+      windowStart?: string | null;
+      windowEnd?: string | null;
+      timezone?: string | null;
+    },
+  ) {
+    if (!input || typeof input !== 'object') {
+      throw new BadRequestException('请提供自动发送设置');
     }
-    const tenant = await this.store.setTenantAutoSendEnabled(tenantId, enabled);
-    return { enabled: tenant.autoSendEnabled };
+    const patch: {
+      enabled?: boolean;
+      windowStart?: string | null;
+      windowEnd?: string | null;
+      timezone?: string | null;
+    } = {};
+    if (input.enabled !== undefined) {
+      if (typeof input.enabled !== 'boolean') {
+        throw new BadRequestException('enabled 必须为布尔值');
+      }
+      patch.enabled = input.enabled;
+    }
+    if (input.windowStart !== undefined || input.windowEnd !== undefined) {
+      const startRaw =
+        input.windowStart === undefined
+          ? undefined
+          : String(input.windowStart ?? '').trim();
+      const endRaw =
+        input.windowEnd === undefined
+          ? undefined
+          : String(input.windowEnd ?? '').trim();
+      if (startRaw !== undefined) {
+        if (startRaw && !parseHhMm(startRaw)) {
+          throw new BadRequestException('开始时间格式应为 HH:mm');
+        }
+        patch.windowStart = startRaw ? parseHhMm(startRaw) : null;
+      }
+      if (endRaw !== undefined) {
+        if (endRaw && !parseHhMm(endRaw)) {
+          throw new BadRequestException('结束时间格式应为 HH:mm');
+        }
+        patch.windowEnd = endRaw ? parseHhMm(endRaw) : null;
+      }
+      // 只填一端时要求两端都有，或都清空
+      const current = await this.store.getTenant(tenantId);
+      if (!current) throw new NotFoundException('工作区不存在');
+      const nextStart =
+        patch.windowStart !== undefined
+          ? patch.windowStart
+          : current.autoSendWindowStart;
+      const nextEnd =
+        patch.windowEnd !== undefined ? patch.windowEnd : current.autoSendWindowEnd;
+      if (Boolean(nextStart) !== Boolean(nextEnd)) {
+        throw new BadRequestException('请同时填写开始和结束时间，或都留空表示全天');
+      }
+    }
+    if (input.timezone !== undefined) {
+      const tz = String(input.timezone ?? '').trim() || 'Asia/Shanghai';
+      if (tz.length > 64) {
+        throw new BadRequestException('时区标识过长');
+      }
+      patch.timezone = tz;
+    }
+    if (
+      patch.enabled === undefined &&
+      patch.windowStart === undefined &&
+      patch.windowEnd === undefined &&
+      patch.timezone === undefined
+    ) {
+      throw new BadRequestException('请提供要更新的字段');
+    }
+    const tenant = await this.store.setTenantAutoSendSetting(tenantId, patch);
+    return this.toAutoSendView(tenant);
+  }
+
+  private toAutoSendView(tenant: {
+    autoSendEnabled: boolean;
+    autoSendWindowStart: string | null;
+    autoSendWindowEnd: string | null;
+    autoSendTimezone: string;
+  }) {
+    const inWindow = isWithinAutoSendWindow(
+      tenant.autoSendWindowStart,
+      tenant.autoSendWindowEnd,
+      new Date(),
+      tenant.autoSendTimezone,
+    );
+    return {
+      enabled: tenant.autoSendEnabled,
+      windowStart: tenant.autoSendWindowStart,
+      windowEnd: tenant.autoSendWindowEnd,
+      timezone: tenant.autoSendTimezone || 'Asia/Shanghai',
+      inWindow,
+      activeNow: tenantAllowsAutoSendNow(tenant),
+    };
+  }
+
+  async getReplyStyle(tenantId: string) {
+    const tenant = await this.store.getTenant(tenantId);
+    if (!tenant) throw new NotFoundException('工作区不存在');
+    return {
+      tone: tenant.aiTone,
+      persona: tenant.aiPersona,
+      systemPrompt: tenant.aiSystemPrompt,
+      maxLength: tenant.aiMaxLength,
+    };
+  }
+
+  async setReplyStyle(
+    tenantId: string,
+    input: {
+      tone?: string;
+      persona?: string;
+      systemPrompt?: string;
+      maxLength?: number;
+    },
+  ) {
+    if (!input || typeof input !== 'object') {
+      throw new BadRequestException('请提供回复风格配置');
+    }
+    if (input.tone !== undefined) {
+      const tone = String(input.tone).trim().toLowerCase();
+      if (!['direct', 'warm', 'formal'].includes(tone)) {
+        throw new BadRequestException('语气仅支持 direct / warm / formal');
+      }
+    }
+    if (input.persona !== undefined && String(input.persona).length > 120) {
+      throw new BadRequestException('人设称谓最多 120 字');
+    }
+    if (input.systemPrompt !== undefined && String(input.systemPrompt).length > 4000) {
+      throw new BadRequestException('补充指令最多 4000 字');
+    }
+    if (input.maxLength !== undefined) {
+      const n = Number(input.maxLength);
+      if (!Number.isFinite(n) || n < 50 || n > 2000) {
+        throw new BadRequestException('回复长度需在 50～2000 之间');
+      }
+    }
+    const tenant = await this.store.setTenantAiReplyStyle(tenantId, input);
+    return {
+      tone: tenant.aiTone,
+      persona: tenant.aiPersona,
+      systemPrompt: tenant.aiSystemPrompt,
+      maxLength: tenant.aiMaxLength,
+    };
   }
 
   async list(tenantId: string) {

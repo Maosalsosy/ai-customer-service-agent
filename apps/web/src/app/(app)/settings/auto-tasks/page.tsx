@@ -159,7 +159,7 @@ export default function AutoTasksPage() {
         <div className="space-y-3 text-sm">
           <p className="break-words text-ink">{selected?.content}</p>
           <p className="border-l-2 border-warn bg-warn-soft px-3 py-2 text-xs leading-5 text-ink">
-            如果租户已开启自动发送，且知识引用、联系人策略和会话状态均满足条件，重放任务可能自动向当前渠道发送回复。模拟连接只会产生模拟发送结果。
+            如果工作区已开启自动发送，且知识引用、联系人策略和会话状态均满足条件，重放任务可能自动向当前渠道发送回复。模拟连接只会产生模拟发送结果。
           </p>
         </div>
       </Modal>

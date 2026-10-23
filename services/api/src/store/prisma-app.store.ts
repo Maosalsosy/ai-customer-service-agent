@@ -32,6 +32,11 @@ import { resolveAnalyticsRange } from '../analytics/analytics-range.js';
 import { buildSupportAnalytics } from '../analytics/build-support-analytics.js';
 import { hashPassword } from '../auth/password.js';
 import { isDemoSeedEnabled } from '../common/runtime-mode.js';
+import {
+  mapTenantRow,
+  normalizeAiMaxLength,
+  normalizeAiTone,
+} from './tenant-mapper.js';
 import type {
   AiProviderRecord,
   AppStore,
@@ -64,6 +69,12 @@ function clock(date: Date): string {
 
 function newId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
+}
+
+/** undefined = no limit (full list); otherwise clamp 1–200. */
+function clampPageSize(limit?: number): number | undefined {
+  if (limit == null || !Number.isFinite(limit)) return undefined;
+  return Math.min(200, Math.max(1, Math.floor(limit)));
 }
 
 function toPgVector(values: number[]): string {
@@ -350,25 +361,33 @@ export class PrismaAppStore implements AppStore, OnModuleInit {
     tenantId: string,
     status?: ConversationStatus,
     q?: string,
+    opts?: { limit?: number; offset?: number },
   ) {
-    const rows = await this.prisma.conversation.findMany({
-      where: {
-        tenantId,
-        ...(status ? { status } : {}),
-        ...(q?.trim()
-          ? {
-              OR: [
-                { contactName: { contains: q.trim() } },
-                { preview: { contains: q.trim() } },
-                { contactMeta: { contains: q.trim() } },
-              ],
-            }
-          : {}),
-      },
-      include: { assignee: true },
-      orderBy: { lastMessageAt: 'desc' },
-    });
-    return { items: rows.map((row) => this.mapConversation(row)) };
+    const where = {
+      tenantId,
+      ...(status ? { status } : {}),
+      ...(q?.trim()
+        ? {
+            OR: [
+              { contactName: { contains: q.trim() } },
+              { preview: { contains: q.trim() } },
+              { contactMeta: { contains: q.trim() } },
+            ],
+          }
+        : {}),
+    };
+    const limit = clampPageSize(opts?.limit);
+    const offset = Math.max(0, opts?.offset ?? 0);
+    const [total, rows] = await Promise.all([
+      this.prisma.conversation.count({ where }),
+      this.prisma.conversation.findMany({
+        where,
+        include: { assignee: true },
+        orderBy: { lastMessageAt: 'desc' },
+        ...(limit != null ? { take: limit, skip: offset } : {}),
+      }),
+    ]);
+    return { items: rows.map((row) => this.mapConversation(row)), total };
   }
 
   async getConversation(tenantId: string, id: string) {
@@ -666,7 +685,7 @@ export class PrismaAppStore implements AppStore, OnModuleInit {
 
   async setDefaultContactPolicy(tenantId: string, policy: ContactPolicy): Promise<Tenant> {
     const row = await this.prisma.tenant.update({ where: { id: tenantId }, data: { defaultContactPolicy: policy } });
-    return { id: row.id, name: row.name, slug: row.slug, autoSendEnabled: row.autoSendEnabled, defaultContactPolicy: row.defaultContactPolicy as ContactPolicy };
+    return mapTenantRow(row);
   }
 
   async setExternalContactPolicies(
@@ -1054,33 +1073,50 @@ export class PrismaAppStore implements AppStore, OnModuleInit {
     return this.mapDraft(row);
   }
 
-  async listKnowledge(tenantId: string, q?: string, categoryId?: string, knowledgeBaseId?: string) {
+  async listKnowledge(
+    tenantId: string,
+    q?: string,
+    categoryId?: string,
+    knowledgeBaseId?: string,
+    opts?: { limit?: number; offset?: number; status?: DocStatus },
+  ) {
     const keyword = q?.trim();
-    const rows = await this.prisma.knowledgeDocument.findMany({
-      where: {
-        tenantId,
-        ...(knowledgeBaseId ? { knowledgeBaseId } : {}),
-        ...(categoryId ? { categoryId } : {}),
-        ...(keyword
-          ? {
-              OR: [
-                { title: { contains: keyword, mode: 'insensitive' } },
-                { excerpt: { contains: keyword, mode: 'insensitive' } },
-                { body: { contains: keyword, mode: 'insensitive' } },
-              ],
-            }
-          : {}),
-      },
-      orderBy: { updatedAt: 'desc' },
-    });
+    const where = {
+      tenantId,
+      ...(knowledgeBaseId ? { knowledgeBaseId } : {}),
+      ...(categoryId ? { categoryId } : {}),
+      ...(opts?.status ? { status: opts.status } : {}),
+      ...(keyword
+        ? {
+            OR: [
+              { title: { contains: keyword, mode: 'insensitive' as const } },
+              { excerpt: { contains: keyword, mode: 'insensitive' as const } },
+              { body: { contains: keyword, mode: 'insensitive' as const } },
+            ],
+          }
+        : {}),
+    };
+    const limit = clampPageSize(opts?.limit);
+    const offset = Math.max(0, opts?.offset ?? 0);
+    const [total, rows] = await Promise.all([
+      this.prisma.knowledgeDocument.count({ where }),
+      this.prisma.knowledgeDocument.findMany({
+        where,
+        include: { category: { select: { name: true } } },
+        orderBy: { updatedAt: 'desc' },
+        ...(limit != null ? { take: limit, skip: offset } : {}),
+      }),
+    ]);
     return {
-      items: await Promise.all(rows.map(async (d) => ({ ...this.toKnowledgeListItem(d), categoryId: d.categoryId, categoryName: d.categoryId ? (await this.prisma.knowledgeCategory.findFirst({ where: { id: d.categoryId, tenantId }, select: { name: true } }))?.name ?? null : null }))),
+      items: rows.map((d) => this.toKnowledgeListItem(d)),
+      total,
     };
   }
 
   async getKnowledge(tenantId: string, id: string) {
     const doc = await this.prisma.knowledgeDocument.findFirst({
       where: { id, tenantId },
+      include: { category: { select: { name: true } } },
     });
     if (!doc) throw new NotFoundException('Document not found');
     return {
@@ -1095,7 +1131,7 @@ export class PrismaAppStore implements AppStore, OnModuleInit {
       version: doc.version,
       knowledgeBaseId: doc.knowledgeBaseId,
       categoryId: doc.categoryId,
-      categoryName: (await this.prisma.knowledgeCategory.findFirst({ where: { id: doc.categoryId ?? '', tenantId }, select: { name: true } }))?.name ?? null,
+      categoryName: doc.category?.name ?? null,
       body: doc.body,
     };
   }
@@ -1278,14 +1314,51 @@ export class PrismaAppStore implements AppStore, OnModuleInit {
 
   async listKnowledgeGaps(tenantId: string): Promise<KnowledgeGap[]> {
     const rows = await this.prisma.knowledgeGap.findMany({ where: { tenantId }, include: { conversation: { select: { contactName: true } } }, orderBy: { lastSeenAt: 'desc' } });
-    return rows.map((row) => ({ id: row.id, tenantId: row.tenantId, conversationId: row.conversationId, customerMessageId: row.customerMessageId, query: row.query, knowledgeBaseId: row.knowledgeBaseId ?? undefined, status: row.status as KnowledgeGap['status'], occurrences: row.occurrences, firstSeenAt: row.firstSeenAt.toISOString(), lastSeenAt: row.lastSeenAt.toISOString(), contactName: row.conversation.contactName }));
+    return rows.map((row) => this.mapKnowledgeGap(row));
+  }
+
+  async getKnowledgeGap(tenantId: string, id: string): Promise<KnowledgeGap> {
+    const row = await this.prisma.knowledgeGap.findFirst({
+      where: { id, tenantId },
+      include: { conversation: { select: { contactName: true } } },
+    });
+    if (!row) throw new NotFoundException('Knowledge gap not found');
+    return this.mapKnowledgeGap(row);
   }
 
   async updateKnowledgeGap(tenantId: string, id: string, status: KnowledgeGap['status']): Promise<KnowledgeGap> {
     const found = await this.prisma.knowledgeGap.findFirst({ where: { id, tenantId } });
     if (!found) throw new NotFoundException('Knowledge gap not found');
     const row = await this.prisma.knowledgeGap.update({ where: { id }, data: { status }, include: { conversation: { select: { contactName: true } } } });
-    return { id: row.id, tenantId: row.tenantId, conversationId: row.conversationId, customerMessageId: row.customerMessageId, query: row.query, knowledgeBaseId: row.knowledgeBaseId ?? undefined, status: row.status as KnowledgeGap['status'], occurrences: row.occurrences, firstSeenAt: row.firstSeenAt.toISOString(), lastSeenAt: row.lastSeenAt.toISOString(), contactName: row.conversation.contactName };
+    return this.mapKnowledgeGap(row);
+  }
+
+  private mapKnowledgeGap(row: {
+    id: string;
+    tenantId: string;
+    conversationId: string;
+    customerMessageId: string;
+    query: string;
+    knowledgeBaseId: string | null;
+    status: string;
+    occurrences: number;
+    firstSeenAt: Date;
+    lastSeenAt: Date;
+    conversation: { contactName: string };
+  }): KnowledgeGap {
+    return {
+      id: row.id,
+      tenantId: row.tenantId,
+      conversationId: row.conversationId,
+      customerMessageId: row.customerMessageId,
+      query: row.query,
+      knowledgeBaseId: row.knowledgeBaseId ?? undefined,
+      status: row.status as KnowledgeGap['status'],
+      occurrences: row.occurrences,
+      firstSeenAt: row.firstSeenAt.toISOString(),
+      lastSeenAt: row.lastSeenAt.toISOString(),
+      contactName: row.conversation.contactName,
+    };
   }
 
   async publishKnowledge(tenantId: string, id: string) {
@@ -2367,40 +2440,72 @@ export class PrismaAppStore implements AppStore, OnModuleInit {
     });
     return rows.map((row) => ({
       role: row.role,
-      tenant: {
-        id: row.tenant.id,
-        name: row.tenant.name,
-        slug: row.tenant.slug,
-        autoSendEnabled: row.tenant.autoSendEnabled,
-        defaultContactPolicy: row.tenant.defaultContactPolicy as ContactPolicy,
-      },
+      tenant: mapTenantRow(row.tenant),
     }));
   }
 
   async getTenant(tenantId: string): Promise<Tenant | null> {
     const row = await this.prisma.tenant.findUnique({ where: { id: tenantId } });
     if (!row) return null;
-    return {
-      id: row.id,
-      name: row.name,
-      slug: row.slug,
-      autoSendEnabled: row.autoSendEnabled,
-      defaultContactPolicy: row.defaultContactPolicy as ContactPolicy,
-    };
+    return mapTenantRow(row);
   }
 
   async setTenantAutoSendEnabled(tenantId: string, enabled: boolean): Promise<Tenant> {
+    return this.setTenantAutoSendSetting(tenantId, { enabled });
+  }
+
+  async setTenantAutoSendSetting(
+    tenantId: string,
+    input: {
+      enabled?: boolean;
+      windowStart?: string | null;
+      windowEnd?: string | null;
+      timezone?: string | null;
+    },
+  ): Promise<Tenant> {
     const row = await this.prisma.tenant.update({
       where: { id: tenantId },
-      data: { autoSendEnabled: enabled },
+      data: {
+        ...(input.enabled !== undefined ? { autoSendEnabled: input.enabled } : {}),
+        ...(input.windowStart !== undefined
+          ? { autoSendWindowStart: input.windowStart }
+          : {}),
+        ...(input.windowEnd !== undefined
+          ? { autoSendWindowEnd: input.windowEnd }
+          : {}),
+        ...(input.timezone !== undefined
+          ? { autoSendTimezone: input.timezone?.trim() || 'Asia/Shanghai' }
+          : {}),
+      },
     });
-    return {
-      id: row.id,
-      name: row.name,
-      slug: row.slug,
-      autoSendEnabled: row.autoSendEnabled,
-      defaultContactPolicy: row.defaultContactPolicy as ContactPolicy,
-    };
+    return mapTenantRow(row);
+  }
+
+  async setTenantAiReplyStyle(
+    tenantId: string,
+    input: {
+      tone?: string;
+      persona?: string;
+      systemPrompt?: string;
+      maxLength?: number;
+    },
+  ): Promise<Tenant> {
+    const row = await this.prisma.tenant.update({
+      where: { id: tenantId },
+      data: {
+        ...(input.tone !== undefined ? { aiTone: normalizeAiTone(input.tone) } : {}),
+        ...(input.persona !== undefined
+          ? { aiPersona: input.persona.trim().slice(0, 120) || null }
+          : {}),
+        ...(input.systemPrompt !== undefined
+          ? { aiSystemPrompt: input.systemPrompt.trim().slice(0, 4000) || null }
+          : {}),
+        ...(input.maxLength !== undefined
+          ? { aiMaxLength: normalizeAiMaxLength(input.maxLength) }
+          : {}),
+      },
+    });
+    return mapTenantRow(row);
   }
 
   async listTenantMembers(tenantId: string): Promise<TenantMemberRow[]> {
@@ -2448,7 +2553,7 @@ export class PrismaAppStore implements AppStore, OnModuleInit {
       where: { tenantId_userId: { tenantId, userId: user.id } },
     });
     if (existing?.status === 'active') {
-      throw new BadRequestException('该成员已在当前租户中');
+      throw new BadRequestException('该成员已在当前工作区中');
     }
     const member = existing
       ? await this.prisma.tenantMember.update({

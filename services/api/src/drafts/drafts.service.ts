@@ -7,6 +7,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service.js';
+import { tenantAllowsAutoSendNow } from '../common/auto-send-window.js';
 import { RealtimeService } from '../events/realtime.service.js';
 import { APP_STORE, type AppStore } from '../store/app-store.js';
 import type { ReplyDraft } from '../store/types.js';
@@ -146,7 +147,7 @@ export class DraftsService implements OnModuleInit, OnModuleDestroy {
         .reverse()
         .find((message) => message.sender === 'customer' || message.sender === 'agent');
       const stillCurrent =
-        tenant?.autoSendEnabled &&
+        Boolean(tenant && tenantAllowsAutoSendNow(tenant)) &&
         currentConversation.contactPolicy === 'ai' &&
         currentConversation.handlingMode === 'ai' &&
         latestInteraction?.sender === 'customer' &&

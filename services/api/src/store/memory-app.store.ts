@@ -91,6 +91,7 @@ export class MemoryAppStore implements AppStore {
     tenantId: string,
     status?: ConversationStatus,
     q?: string,
+    opts?: { limit?: number; offset?: number },
   ) {
     let items = this.memory.conversations.filter((c) => c.tenantId === tenantId);
     if (status) items = items.filter((c) => c.status === status);
@@ -103,7 +104,14 @@ export class MemoryAppStore implements AppStore {
           (c.contactMeta?.includes(keyword) ?? false),
       );
     }
-    return { items };
+    const total = items.length;
+    const offset = Math.max(0, opts?.offset ?? 0);
+    const limit =
+      opts?.limit != null && Number.isFinite(opts.limit)
+        ? Math.min(200, Math.max(1, Math.floor(opts.limit)))
+        : undefined;
+    if (limit != null) items = items.slice(offset, offset + limit);
+    return { items, total };
   }
 
   getConversation(tenantId: string, id: string): Conversation {
@@ -458,9 +466,16 @@ export class MemoryAppStore implements AppStore {
     return this.memory.newId(prefix);
   }
 
-  listKnowledge(tenantId: string, q?: string, categoryId?: string, knowledgeBaseId?: string) {
+  listKnowledge(
+    tenantId: string,
+    q?: string,
+    categoryId?: string,
+    knowledgeBaseId?: string,
+    opts?: { limit?: number; offset?: number; status?: DocStatus },
+  ) {
     let items = this.memory.knowledge.filter((d) => d.tenantId === tenantId && (!knowledgeBaseId || d.knowledgeBaseId === knowledgeBaseId));
     if (categoryId) items = items.filter((doc) => doc.categoryId === categoryId);
+    if (opts?.status) items = items.filter((doc) => doc.status === opts.status);
     if (q?.trim()) {
       const keyword = q.trim().toLowerCase();
       items = items.filter(
@@ -470,11 +485,19 @@ export class MemoryAppStore implements AppStore {
           d.body.toLowerCase().includes(keyword),
       );
     }
+    const total = items.length;
+    const offset = Math.max(0, opts?.offset ?? 0);
+    const limit =
+      opts?.limit != null && Number.isFinite(opts.limit)
+        ? Math.min(200, Math.max(1, Math.floor(opts.limit)))
+        : undefined;
+    if (limit != null) items = items.slice(offset, offset + limit);
     return {
       items: items.map((doc) => ({
         ...this.toKnowledgeListItem(doc),
         categoryName: this.memory.knowledgeCategories.find((item) => item.id === doc.categoryId)?.name ?? null,
       })),
+      total,
     };
   }
 
@@ -677,6 +700,12 @@ export class MemoryAppStore implements AppStore {
 
   listKnowledgeGaps(tenantId: string) {
     return this.memory.knowledgeGaps.filter((item) => item.tenantId === tenantId);
+  }
+
+  getKnowledgeGap(tenantId: string, id: string) {
+    const row = this.memory.knowledgeGaps.find((item) => item.tenantId === tenantId && item.id === id);
+    if (!row) throw new NotFoundException('Knowledge gap not found');
+    return row;
   }
 
   updateKnowledgeGap(tenantId: string, id: string, status: KnowledgeGap['status']) {
@@ -1396,13 +1425,7 @@ export class MemoryAppStore implements AppStore {
       .filter((row) => row.userId === userId && row.status === 'active')
       .map((row) => ({
         role: row.role,
-        tenant: {
-          id: this.memory.tenant.id,
-          name: this.memory.tenant.name,
-          slug: this.memory.tenant.slug,
-          autoSendEnabled: this.memory.tenant.autoSendEnabled,
-          defaultContactPolicy: this.memory.tenant.defaultContactPolicy,
-        },
+        tenant: { ...this.memory.tenant },
       }))
       .filter((row) => row.tenant.id === DEMO_TENANT.id);
   }
@@ -1451,7 +1474,7 @@ export class MemoryAppStore implements AppStore {
       (row) => row.tenantId === tenantId && row.userId === account!.id,
     );
     if (existing && existing.status === 'active') {
-      throw new BadRequestException('该成员已在当前租户中');
+      throw new BadRequestException('该成员已在当前工作区中');
     }
     if (existing) {
       existing.status = 'active';
@@ -1515,8 +1538,59 @@ export class MemoryAppStore implements AppStore {
   }
 
   setTenantAutoSendEnabled(tenantId: string, enabled: boolean): Tenant {
+    return this.setTenantAutoSendSetting(tenantId, { enabled });
+  }
+
+  setTenantAutoSendSetting(
+    tenantId: string,
+    input: {
+      enabled?: boolean;
+      windowStart?: string | null;
+      windowEnd?: string | null;
+      timezone?: string | null;
+    },
+  ): Tenant {
     if (this.memory.tenant.id !== tenantId) throw new NotFoundException('Tenant not found');
-    this.memory.tenant.autoSendEnabled = enabled;
+    if (input.enabled !== undefined) this.memory.tenant.autoSendEnabled = input.enabled;
+    if (input.windowStart !== undefined) {
+      this.memory.tenant.autoSendWindowStart = input.windowStart;
+    }
+    if (input.windowEnd !== undefined) {
+      this.memory.tenant.autoSendWindowEnd = input.windowEnd;
+    }
+    if (input.timezone !== undefined) {
+      this.memory.tenant.autoSendTimezone =
+        input.timezone?.trim() || 'Asia/Shanghai';
+    }
+    return { ...this.memory.tenant };
+  }
+
+  setTenantAiReplyStyle(
+    tenantId: string,
+    input: {
+      tone?: string;
+      persona?: string;
+      systemPrompt?: string;
+      maxLength?: number;
+    },
+  ): Tenant {
+    if (this.memory.tenant.id !== tenantId) throw new NotFoundException('Tenant not found');
+    if (input.tone !== undefined) {
+      this.memory.tenant.aiTone =
+        input.tone === 'warm' || input.tone === 'formal' ? input.tone : 'direct';
+    }
+    if (input.persona !== undefined) {
+      this.memory.tenant.aiPersona = input.persona.trim().slice(0, 120);
+    }
+    if (input.systemPrompt !== undefined) {
+      this.memory.tenant.aiSystemPrompt = input.systemPrompt.trim().slice(0, 4000);
+    }
+    if (input.maxLength !== undefined) {
+      const n = Math.floor(Number(input.maxLength));
+      this.memory.tenant.aiMaxLength = Number.isFinite(n)
+        ? Math.min(2000, Math.max(50, n))
+        : 500;
+    }
     return { ...this.memory.tenant };
   }
 

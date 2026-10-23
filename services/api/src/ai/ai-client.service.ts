@@ -11,6 +11,30 @@ export type AiDraftResult = {
 
 const AI_REQUEST_TIMEOUT_MS = 35_000;
 const PROVIDER_TEST_TIMEOUT_MS = 25_000;
+const AI_RETRY_MAX = 2;
+const AI_RETRY_BASE_MS = 400;
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableStatus(status: number) {
+  return status === 408 || status === 429 || status === 502 || status === 503 || status === 504;
+}
+
+function isRetryableError(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  const name = error.name.toLowerCase();
+  const message = error.message.toLowerCase();
+  return (
+    name.includes('timeout') ||
+    name.includes('abort') ||
+    message.includes('timeout') ||
+    message.includes('fetch failed') ||
+    message.includes('econnreset') ||
+    message.includes('econnrefused')
+  );
+}
 
 @Injectable()
 export class AiClientService {
@@ -54,6 +78,12 @@ export class AiClientService {
     customerMessage: string;
     conversationContext?: { role: 'customer' | 'agent' | 'system'; content: string }[];
     knowledgeHits: { documentId: string; title: string; excerpt: string }[];
+    policy?: {
+      tone?: string;
+      maxLength?: number;
+      persona?: string;
+      systemPrompt?: string;
+    };
     provider?: {
       apiKey: string;
       baseUrl: string;
@@ -65,69 +95,91 @@ export class AiClientService {
     if (!base) return null;
 
     const token = process.env.AI_SERVICE_TOKEN ?? 'dev-ai-token';
-    try {
-      const res = await fetch(`${base}/internal/v1/reply-drafts`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-AI-Token': token,
-          ...(currentRequestId() ? { 'X-Request-ID': currentRequestId()! } : {}),
-        },
-        body: JSON.stringify({
-          tenantId: input.tenantId,
-          conversationId: input.conversationId,
-          customerMessage: input.customerMessage,
-          conversationContext: input.conversationContext ?? [],
-          knowledgeHits: input.knowledgeHits,
-          policy: {
-            tone: 'direct',
-            maxLength: 500,
-            requireCitations: input.knowledgeHits.length > 0,
-          },
-          provider: input.provider
-            ? {
-                apiKey: input.provider.apiKey,
-                baseUrl: input.provider.baseUrl,
-                model: input.provider.model,
-                name: input.provider.name,
-              }
-            : undefined,
-        }),
-        signal: AbortSignal.timeout(AI_REQUEST_TIMEOUT_MS),
-      });
+    const payload = JSON.stringify({
+      tenantId: input.tenantId,
+      conversationId: input.conversationId,
+      customerMessage: input.customerMessage,
+      conversationContext: input.conversationContext ?? [],
+      knowledgeHits: input.knowledgeHits,
+      policy: {
+        tone: input.policy?.tone ?? 'direct',
+        maxLength: input.policy?.maxLength ?? 500,
+        persona: input.policy?.persona ?? '',
+        systemPrompt: input.policy?.systemPrompt ?? '',
+        requireCitations: input.knowledgeHits.length > 0,
+      },
+      provider: input.provider
+        ? {
+            apiKey: input.provider.apiKey,
+            baseUrl: input.provider.baseUrl,
+            model: input.provider.model,
+            name: input.provider.name,
+          }
+        : undefined,
+    });
 
-      if (!res.ok) {
-        this.logger.warn(`AI service responded ${res.status}`);
+    for (let attempt = 1; attempt <= AI_RETRY_MAX; attempt += 1) {
+      try {
+        const res = await fetch(`${base}/internal/v1/reply-drafts`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-AI-Token': token,
+            ...(currentRequestId() ? { 'X-Request-ID': currentRequestId()! } : {}),
+          },
+          body: payload,
+          signal: AbortSignal.timeout(AI_REQUEST_TIMEOUT_MS),
+        });
+
+        if (!res.ok) {
+          if (attempt < AI_RETRY_MAX && isRetryableStatus(res.status)) {
+            this.logger.warn(
+              `AI service responded ${res.status}; retry ${attempt}/${AI_RETRY_MAX - 1}`,
+            );
+            await sleep(AI_RETRY_BASE_MS * attempt);
+            continue;
+          }
+          this.logger.warn(`AI service responded ${res.status}`);
+          return null;
+        }
+
+        const body = (await res.json()) as {
+          status: AiDraftResult['status'];
+          draft: string | null;
+          citations?: { documentId: string; quote: string }[];
+          reason?: string;
+          model?: { provider: string; name: string };
+        };
+
+        return {
+          status: body.status,
+          draft: body.draft,
+          reason: body.reason,
+          model: body.model,
+          citations: (body.citations ?? []).map((c) => ({
+            documentId: c.documentId,
+            documentTitle:
+              input.knowledgeHits.find((h) => h.documentId === c.documentId)
+                ?.title ?? '知识文档',
+            quote: c.quote,
+          })),
+        };
+      } catch (error) {
+        if (attempt < AI_RETRY_MAX && isRetryableError(error)) {
+          this.logger.warn(
+            `AI service unavailable (${error instanceof Error ? error.message : 'unknown'}); retry ${attempt}/${AI_RETRY_MAX - 1}`,
+          );
+          await sleep(AI_RETRY_BASE_MS * attempt);
+          continue;
+        }
+        this.logger.warn(
+          `AI service unavailable: ${error instanceof Error ? error.message : 'unknown'}`,
+        );
         return null;
       }
-
-      const body = (await res.json()) as {
-        status: AiDraftResult['status'];
-        draft: string | null;
-        citations?: { documentId: string; quote: string }[];
-        reason?: string;
-        model?: { provider: string; name: string };
-      };
-
-      return {
-        status: body.status,
-        draft: body.draft,
-        reason: body.reason,
-        model: body.model,
-        citations: (body.citations ?? []).map((c) => ({
-          documentId: c.documentId,
-          documentTitle:
-            input.knowledgeHits.find((h) => h.documentId === c.documentId)
-              ?.title ?? '知识文档',
-          quote: c.quote,
-        })),
-      };
-    } catch (error) {
-      this.logger.warn(
-        `AI service unavailable: ${error instanceof Error ? error.message : 'unknown'}`,
-      );
-      return null;
     }
+
+    return null;
   }
 
   async evaluateReply(input: {

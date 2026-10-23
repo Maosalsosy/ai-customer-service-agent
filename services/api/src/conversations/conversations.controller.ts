@@ -66,8 +66,13 @@ export class ConversationsController {
     @CurrentTenantId() tenantId: string,
     @Query('status') status?: ConversationStatus,
     @Query('q') q?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
   ) {
-    return this.conversations.list(tenantId, status, q);
+    return this.conversations.list(tenantId, status, q, {
+      limit: limit != null ? Number(limit) : undefined,
+      offset: offset != null ? Number(offset) : undefined,
+    });
   }
 
   @Get(':id')

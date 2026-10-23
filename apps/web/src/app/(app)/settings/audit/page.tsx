@@ -9,7 +9,7 @@ type AuditItem = Awaited<ReturnType<typeof api.listAuditLogs>>["items"][number];
 
 const ACTION_LABEL: Record<string, string> = {
   "auth.login": "登录",
-  "auth.switch_tenant": "切换租户",
+  "auth.switch_tenant": "切换工作区",
   "conversation.assign": "接手会话",
   "conversation.mode_ai": "切换 AI 接管",
   "conversation.mode_human": "切换人工接管",
@@ -57,6 +57,7 @@ function isAdminRole(role?: string) {
     lower === "admin" ||
     lower === "owner" ||
     raw === "管理员" ||
+    raw === "工作区管理员" ||
     raw === "租户管理员"
   );
 }
@@ -130,7 +131,7 @@ export default function AuditSettingsPage() {
   if (admin === false) {
     return (
       <div className="animate-rise space-y-4">
-        <PageHeader title="操作记录" description="仅管理员可查看租户审计日志。" />
+        <PageHeader title="操作记录" description="仅管理员可查看工作区审计日志。" />
         <Panel className="p-8">
           <EmptyState
             title="无权查看"
@@ -153,7 +154,7 @@ export default function AuditSettingsPage() {
     <div className="animate-rise space-y-4">
       <PageHeader
         title="操作记录"
-        description="当前租户内的关键操作，按时间倒序。用于排查会话、知识库与成员变更。"
+        description="当前工作区内的关键操作，按时间倒序。用于排查会话、知识库与成员变更。"
       />
 
       {error ? <p className="text-sm text-danger">{error}</p> : null}

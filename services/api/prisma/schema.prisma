@@ -13,7 +13,14 @@ model Tenant {
   slug                 String   @unique @db.VarChar(80)
   status               String   @default("active") @db.VarChar(20)
   autoSendEnabled      Boolean  @default(false) @map("auto_send_enabled")
+  autoSendWindowStart  String?  @map("auto_send_window_start") @db.VarChar(5)
+  autoSendWindowEnd    String?  @map("auto_send_window_end") @db.VarChar(5)
+  autoSendTimezone     String   @default("Asia/Shanghai") @map("auto_send_timezone") @db.VarChar(64)
   defaultContactPolicy String   @default("ai") @map("default_contact_policy") @db.VarChar(16)
+  aiTone               String   @default("direct") @map("ai_tone") @db.VarChar(16)
+  aiPersona            String?  @map("ai_persona") @db.VarChar(120)
+  aiSystemPrompt       String?  @map("ai_system_prompt") @db.Text
+  aiMaxLength          Int      @default(500) @map("ai_max_length")
   createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 

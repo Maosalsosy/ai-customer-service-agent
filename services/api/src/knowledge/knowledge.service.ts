@@ -48,9 +48,29 @@ export class KnowledgeService {
     if (id === base.id) throw new BadRequestException('项目默认知识库不能删除');
     throw new BadRequestException('本项目仅使用一个默认知识库');
   }
-  async list(tenantId: string, q?: string, _categoryId?: string, _knowledgeBaseId?: string) {
+  async list(
+    tenantId: string,
+    q?: string,
+    _categoryId?: string,
+    _knowledgeBaseId?: string,
+    opts?: { limit?: number; offset?: number; status?: string },
+  ) {
     const baseId = (await this.store.getDefaultKnowledgeBase(tenantId)).id;
-    return this.store.listKnowledge(tenantId, q, undefined, baseId);
+    const status =
+      opts?.status === 'draft' ||
+      opts?.status === 'pending' ||
+      opts?.status === 'rejected' ||
+      opts?.status === 'processing' ||
+      opts?.status === 'ready' ||
+      opts?.status === 'failed' ||
+      opts?.status === 'archived'
+        ? opts.status
+        : undefined;
+    return this.store.listKnowledge(tenantId, q, undefined, baseId, {
+      limit: opts?.limit,
+      offset: opts?.offset,
+      status,
+    });
   }
 
   async listCategories(_tenantId: string, _knowledgeBaseId?: string) { return []; }
@@ -58,10 +78,18 @@ export class KnowledgeService {
   updateGap(tenantId: string, id: string, status: 'open' | 'in_progress' | 'resolved' | 'ignored') { return this.store.updateKnowledgeGap(tenantId, id, status); }
 
   async convertGapToFaq(tenantId: string, id: string, actorId: string) {
-    const gap = (await this.store.listKnowledgeGaps(tenantId)).find((item) => item.id === id);
-    if (!gap) throw new BadRequestException('未找到知识缺口');
+    let gap;
+    try {
+      gap = await this.store.getKnowledgeGap(tenantId, id);
+    } catch {
+      throw new BadRequestException('未找到知识缺口');
+    }
+    if (gap.status === 'resolved' || gap.status === 'ignored') {
+      throw new BadRequestException('该知识缺口已处理');
+    }
     const knowledgeBaseId = (await this.store.getDefaultKnowledgeBase(tenantId)).id;
     const created = await this.store.createKnowledge(tenantId, { title: `待补充：${gap.query.slice(0, 70)}`, sourceType: 'faq', body: `Q: ${gap.query}\nA: 待知识负责人补充并核实。`, knowledgeBaseId, status: 'pending' });
+    await this.store.updateKnowledgeGap(tenantId, id, 'resolved');
     this.audit.record({ tenantId, actorId, action: 'knowledge.gap.convert', targetType: 'knowledge_gap', targetId: id, detail: { documentId: created.id } });
     return created;
   }
@@ -107,8 +135,8 @@ export class KnowledgeService {
     },
     actor?: { id: string; role: string },
   ) {
-    const title = input.title.trim();
-    const body = input.body.trim();
+    const title = typeof input.title === 'string' ? input.title.trim() : '';
+    const body = typeof input.body === 'string' ? input.body.trim() : '';
     if (!title || !body) {
       throw new BadRequestException('请填写标题和正文');
     }
@@ -236,8 +264,8 @@ export class KnowledgeService {
     },
     actor?: { id: string; role: string },
   ) {
-    const title = input.title.trim();
-    const body = input.body.trim();
+    const title = typeof input.title === 'string' ? input.title.trim() : '';
+    const body = typeof input.body === 'string' ? input.body.trim() : '';
     if (!title || !body) {
       throw new BadRequestException('请填写标题和正文');
     }
@@ -341,21 +369,40 @@ export class KnowledgeService {
     limit = 3,
   ): Promise<KnowledgeHit[]> {
     const baseIds = [(await this.store.getDefaultKnowledgeBase(tenantId)).id];
-    await Promise.all(baseIds.map((id) => this.ensureIndexed(tenantId, id)));
-    const embedded = await this.embed.embedBatch(tenantId, [query]);
-    const queryVec = embedded.vectors[0];
-    const vectorCandidates = queryVec?.length
-      ? await this.store.searchKnowledgeChunks(tenantId, baseIds, queryVec, Math.max(100, limit * 30))
-      : [];
-    const chunks = vectorCandidates.map((hit) => ({
-      documentId: hit.documentId,
-      title: hit.title,
-      content: hit.content,
-      embedding: [],
-      vectorScore: hit.vectorScore,
-    }));
-    const hits = rankChunkHits(query, chunks, queryVec, cosine, limit);
-    if (hits.length) return hits;
+    // 索引仅在发布/补索引时写入；检索路径不再懒加载 embedding，避免拖慢回复。
+
+    let queryVec: number[] | undefined;
+    try {
+      const embedded = await this.embed.embedBatch(tenantId, [query]);
+      queryVec = embedded.vectors[0];
+      if (embedded.source === 'hash') {
+        this.logger.debug('retrieve using hash query vectors (dev fallback)');
+      }
+    } catch (error) {
+      this.logger.warn(
+        `embedding unavailable for retrieve, lexical only: ${
+          error instanceof Error ? error.message : 'unknown'
+        }`,
+      );
+    }
+
+    if (queryVec?.length) {
+      const vectorCandidates = await this.store.searchKnowledgeChunks(
+        tenantId,
+        baseIds,
+        queryVec,
+        Math.max(100, limit * 30),
+      );
+      const chunks = vectorCandidates.map((hit) => ({
+        documentId: hit.documentId,
+        title: hit.title,
+        content: hit.content,
+        embedding: [],
+        vectorScore: hit.vectorScore,
+      }));
+      const hits = rankChunkHits(query, chunks, queryVec, cosine, limit);
+      if (hits.length) return hits;
+    }
 
     const docs = await this.store.readyKnowledgeForRetrieve(tenantId, baseIds);
     const ranked = rankKnowledgeHits(query, docs, limit);
@@ -364,16 +411,102 @@ export class KnowledgeService {
       : [];
   }
 
-  private async ensureIndexed(tenantId: string, knowledgeBaseId: string) {
-    const docs = await this.store.readyKnowledgeForRetrieve(tenantId, knowledgeBaseId);
-    const indexed = new Set(
-      await this.store.indexedKnowledgeDocumentIds(tenantId, knowledgeBaseId),
+  /** 工作台试检索：返回命中与索引概览，不触发补索引。 */
+  async probeRetrieve(
+    tenantId: string,
+    query: string,
+    limit = 5,
+  ): Promise<{
+    query: string;
+    hits: KnowledgeHit[];
+    mode: 'vector' | 'lexical' | 'none';
+    index: Awaited<ReturnType<KnowledgeService['getIndexHealth']>>;
+  }> {
+    const trimmed = query.trim();
+    if (!trimmed) throw new BadRequestException('请输入试检索问题');
+    const capped = Math.min(20, Math.max(1, Math.floor(limit) || 5));
+    const index = await this.getIndexHealth(tenantId);
+    const hits = await this.retrieve(tenantId, trimmed, capped);
+    const mode =
+      hits.length === 0
+        ? 'none'
+        : index.embedding === 'down'
+          ? 'lexical'
+          : index.indexedDocuments > 0
+            ? 'vector'
+            : 'lexical';
+    return { query: trimmed, hits, mode, index };
+  }
+
+  async getIndexHealth(tenantId: string) {
+    const baseId = (await this.store.getDefaultKnowledgeBase(tenantId)).id;
+    const readyDocs = await this.store.readyKnowledgeForRetrieve(tenantId, baseId);
+    const indexedIds = await this.store.indexedKnowledgeDocumentIds(
+      tenantId,
+      baseId,
     );
+    const indexedSet = new Set(indexedIds);
+    const missingDocuments = readyDocs
+      .filter((doc) => !indexedSet.has(doc.id))
+      .map((doc) => ({ id: doc.id, title: doc.title }));
+
+    let embedding: 'api' | 'hash' | 'down' = 'down';
+    let embeddingModel: string | undefined;
+    try {
+      const creds = await this.embed.resolveEmbeddingCredentials(tenantId);
+      if (creds) {
+        embedding = 'api';
+        embeddingModel = creds.model;
+      } else if (process.env.NODE_ENV !== 'production') {
+        embedding = 'hash';
+        embeddingModel = 'hash-v1';
+      }
+    } catch {
+      embedding = 'down';
+    }
+
+    return {
+      readyDocuments: readyDocs.length,
+      indexedDocuments: indexedIds.length,
+      missingDocuments,
+      embedding,
+      embeddingModel: embeddingModel ?? null,
+    };
+  }
+
+  async reindexMissing(tenantId: string, actorId?: string) {
+    const baseId = (await this.store.getDefaultKnowledgeBase(tenantId)).id;
+    const docs = await this.store.readyKnowledgeForRetrieve(tenantId, baseId);
+    const indexed = new Set(
+      await this.store.indexedKnowledgeDocumentIds(tenantId, baseId),
+    );
+    let indexedCount = 0;
+    const errors: { documentId: string; message: string }[] = [];
     for (const doc of docs) {
-      if (!indexed.has(doc.id)) {
+      if (indexed.has(doc.id)) continue;
+      try {
         await this.indexDocument(tenantId, doc);
+        indexedCount += 1;
+      } catch (error) {
+        errors.push({
+          documentId: doc.id,
+          message: error instanceof Error ? error.message : '索引失败',
+        });
       }
     }
+    this.audit.record({
+      tenantId,
+      actorId,
+      action: 'knowledge.reindex_missing',
+      targetType: 'knowledge_base',
+      targetId: baseId,
+      detail: { indexedCount, errorCount: errors.length },
+    });
+    return {
+      indexedCount,
+      errors,
+      index: await this.getIndexHealth(tenantId),
+    };
   }
 
   private async indexDocument(tenantId: string, doc: RetrieveDoc) {

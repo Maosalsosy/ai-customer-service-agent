@@ -21,6 +21,25 @@ function makeService() {
 }
 
 describe('knowledge approval', () => {
+  it('rejects create when title or body is missing', async () => {
+    const { service } = makeService();
+    await expect(
+      service.create(
+        DEMO_TENANT.id,
+        { title: '有标题', sourceType: 'faq', body: undefined as unknown as string },
+        { id: 'user-linxiao', role: 'admin' },
+      ),
+    ).rejects.toThrow(/标题和正文/);
+
+    await expect(
+      service.create(
+        DEMO_TENANT.id,
+        { title: '', sourceType: 'faq', body: '只有正文' },
+        { id: 'user-linxiao', role: 'admin' },
+      ),
+    ).rejects.toThrow(/标题和正文/);
+  });
+
   it('agent create goes pending; admin create stays draft', async () => {
     const { service } = makeService();
     const agentDoc = await service.create(
@@ -104,5 +123,37 @@ describe('knowledge approval', () => {
         { id: 'user-agent-demo', role: 'agent' },
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('convert gap to FAQ marks gap resolved and blocks repeat', async () => {
+    const { service, store } = makeService();
+    const conversation = store.listConversations(DEMO_TENANT.id).items[0];
+    expect(conversation).toBeTruthy();
+    store.recordKnowledgeGap({
+      tenantId: DEMO_TENANT.id,
+      conversationId: conversation.id,
+      customerMessageId: `msg-gap-${Date.now()}`,
+      query: '马克杯能不能印照片？',
+    });
+    const gap = store.listKnowledgeGaps(DEMO_TENANT.id).find(
+      (item) => item.query === '马克杯能不能印照片？',
+    );
+    expect(gap?.status).toBe('open');
+
+    const created = await service.convertGapToFaq(
+      DEMO_TENANT.id,
+      gap!.id,
+      'user-admin',
+    );
+    expect(created.status).toBe('pending');
+    expect(created.sourceType).toBe('faq');
+    expect(
+      store.listKnowledgeGaps(DEMO_TENANT.id).find((item) => item.id === gap!.id)
+        ?.status,
+    ).toBe('resolved');
+
+    await expect(
+      service.convertGapToFaq(DEMO_TENANT.id, gap!.id, 'user-admin'),
+    ).rejects.toThrow(/已处理/);
   });
 });
