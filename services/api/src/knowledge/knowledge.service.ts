@@ -26,6 +26,24 @@ import {
 
 const AGENT_MUTABLE_STATUSES = new Set(['draft', 'pending', 'rejected']);
 
+function normalizeSupplementQuestion(question: string) {
+  return question.trim().replace(/\s+/g, ' ').slice(0, 2000);
+}
+
+/** 过滤纯标点/表情等无意义「问题」，避免生成「待补充：？？？」类垃圾条目。 */
+function isMeaningfulSupplementQuestion(question: string) {
+  const meaningful = question.replace(/[\s\p{P}\p{S}]+/gu, '');
+  return meaningful.length >= 2;
+}
+
+function pendingSupplementTitle(question: string) {
+  return `待补充：${question.slice(0, 70)}`;
+}
+
+function pendingSupplementBody(question: string) {
+  return `Q: ${question}\nA: 待知识负责人补充并核实。`;
+}
+
 @Injectable()
 export class KnowledgeService {
   private readonly logger = new Logger(KnowledgeService.name);
@@ -87,11 +105,57 @@ export class KnowledgeService {
     if (gap.status === 'resolved' || gap.status === 'ignored') {
       throw new BadRequestException('该知识缺口已处理');
     }
+    const question = normalizeSupplementQuestion(gap.query);
+    if (!isMeaningfulSupplementQuestion(question)) {
+      await this.store.updateKnowledgeGap(tenantId, id, 'ignored');
+      throw new BadRequestException('该缺口问题无效（如纯标点），已自动忽略');
+    }
+    const existing = await this.findPendingSupplement(tenantId, question);
+    if (existing) {
+      await this.store.updateKnowledgeGap(tenantId, id, 'resolved');
+      this.audit.record({
+        tenantId,
+        actorId,
+        action: 'knowledge.gap.convert',
+        targetType: 'knowledge_gap',
+        targetId: id,
+        detail: {
+          documentId: existing.id,
+          title: existing.title,
+          reused: true,
+        },
+      });
+      return existing;
+    }
     const knowledgeBaseId = (await this.store.getDefaultKnowledgeBase(tenantId)).id;
-    const created = await this.store.createKnowledge(tenantId, { title: `待补充：${gap.query.slice(0, 70)}`, sourceType: 'faq', body: `Q: ${gap.query}\nA: 待知识负责人补充并核实。`, knowledgeBaseId, status: 'pending' });
+    const created = await this.store.createKnowledge(tenantId, {
+      title: pendingSupplementTitle(question),
+      sourceType: 'faq',
+      body: pendingSupplementBody(question),
+      knowledgeBaseId,
+      status: 'pending',
+    });
     await this.store.updateKnowledgeGap(tenantId, id, 'resolved');
-    this.audit.record({ tenantId, actorId, action: 'knowledge.gap.convert', targetType: 'knowledge_gap', targetId: id, detail: { documentId: created.id } });
+    this.audit.record({
+      tenantId,
+      actorId,
+      action: 'knowledge.gap.convert',
+      targetType: 'knowledge_gap',
+      targetId: id,
+      detail: { documentId: created.id, title: created.title },
+    });
     return created;
+  }
+
+  private async findPendingSupplement(tenantId: string, question: string) {
+    const title = pendingSupplementTitle(question);
+    const listed = await this.store.listKnowledge(tenantId, title, undefined, undefined, {
+      status: 'pending',
+      limit: 50,
+    });
+    const hit = listed.items.find((item) => item.title === title);
+    if (!hit) return null;
+    return this.store.getKnowledge(tenantId, hit.id);
   }
 
   get(tenantId: string, id: string) {
@@ -163,15 +227,23 @@ export class KnowledgeService {
   }
 
   async submitQuestion(tenantId: string, question: string, actorId: string) {
-    const normalized = question.trim().slice(0, 2000);
+    const normalized = normalizeSupplementQuestion(question);
     if (!normalized) throw new BadRequestException('问题内容不能为空');
-    const title = `待补充：${normalized.slice(0, 70)}`;
+    if (!isMeaningfulSupplementQuestion(normalized)) {
+      throw new BadRequestException('请提交有实际内容的客户问题，不要只用问号或标点');
+    }
+    const existing = await this.findPendingSupplement(tenantId, normalized);
+    if (existing) {
+      await this.resolveOpenGapsForQuery(tenantId, normalized);
+      return existing;
+    }
     const created = await this.store.createKnowledge(tenantId, {
-      title,
+      title: pendingSupplementTitle(normalized),
       sourceType: 'faq',
-      body: `Q: ${normalized}\nA: 待知识负责人补充并核实。`,
+      body: pendingSupplementBody(normalized),
       status: 'pending',
     });
+    await this.resolveOpenGapsForQuery(tenantId, normalized);
     this.audit.record({
       tenantId,
       actorId,
@@ -181,6 +253,20 @@ export class KnowledgeService {
       detail: { title: created.title, source: 'conversation' },
     });
     return created;
+  }
+
+  private async resolveOpenGapsForQuery(tenantId: string, question: string) {
+    const gaps = await this.store.listKnowledgeGaps(tenantId);
+    const normalized = normalizeSupplementQuestion(question);
+    await Promise.all(
+      gaps
+        .filter(
+          (gap) =>
+            (gap.status === 'open' || gap.status === 'in_progress') &&
+            normalizeSupplementQuestion(gap.query) === normalized,
+        )
+        .map((gap) => this.store.updateKnowledgeGap(tenantId, gap.id, 'resolved')),
+    );
   }
 
   async importUploads(

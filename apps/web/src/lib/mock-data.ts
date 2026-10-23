@@ -9,15 +9,16 @@ import type {
 export const currentUser = {
   name: "林晓",
   role: "客服人员",
-  tenant: "织云企礼",
+  tenant: "杭州云帆企业礼品有限公司",
 };
 
+/** 与 README / API 种子一致：仅四个演示客户，一人一会话。 */
 export const conversations: Conversation[] = [
   {
     id: "c1",
-    contactName: "陈雨晴",
-    contactMeta: "企业客户 · 市场",
-    preview: "报价能不能写进合同？违约金怎么定？",
+    contactName: "林女士",
+    contactMeta: "青禾资本 · 行政采购",
+    preview: "首批 600 份员工入职礼，合同交期和验收标准怎么写？",
     status: "waiting_human",
     handlingMode: "human",
     assignee: "林晓",
@@ -26,9 +27,9 @@ export const conversations: Conversation[] = [
   },
   {
     id: "c2",
-    contactName: "王浩",
-    contactMeta: "企业客户 · 行政",
-    preview: "打样费能不能免？以前的供应商不收。",
+    contactName: "苏晚",
+    contactMeta: "雾凇科技 · 行政采购",
+    preview: "实物样确认后下单，样品费可以抵货款吗？",
     status: "in_progress",
     handlingMode: "human",
     assignee: "林晓",
@@ -37,9 +38,9 @@ export const conversations: Conversation[] = [
   },
   {
     id: "c3",
-    contactName: "赵明远",
-    contactMeta: "企业客户 · 行政",
-    preview: "200 个杯子能不能印单色 logo？",
+    contactName: "何磊",
+    contactMeta: "启明生物 · 综合管理部",
+    preview: "年会礼盒首批 200 套，能否加印公司 logo？",
     status: "open",
     handlingMode: "ai",
     assignee: null,
@@ -48,23 +49,12 @@ export const conversations: Conversation[] = [
   },
   {
     id: "c4",
-    contactName: "周思雨",
-    contactMeta: "企业客户 · 行政",
-    preview: "能不能先出效果图再付定金？",
+    contactName: "马婷",
+    contactMeta: "嘉禾律师事务所 · 品牌市场",
+    preview: "先确认设计稿和烫金位置，再走采购审批可以吗？",
     status: "open",
     handlingMode: "ai",
     assignee: null,
-    updatedAt: "昨天",
-    unread: false,
-  },
-  {
-    id: "c5",
-    contactName: "李晨",
-    contactMeta: "企业客户 · 市场",
-    preview: "这次 logo 能指定潘通色吗？",
-    status: "in_progress",
-    handlingMode: "human",
-    assignee: "林晓",
     updatedAt: "昨天",
     unread: false,
   },
@@ -76,21 +66,21 @@ export const messagesByConversation: Record<string, Message[]> = {
       id: "m1",
       conversationId: "c1",
       sender: "customer",
-      content: "你好，这份报价能不能写进合同？违约金怎么定？",
+      content: "你好，我们要采购 600 份员工入职礼，报价和交期可以写进合同吗？验收标准怎么约定？",
       createdAt: "11:38",
     },
     {
       id: "m2",
       conversationId: "c1",
       sender: "system",
-      content: "会话已接入 · 企业微信模拟连接",
+      content: "演示渠道已接入 · 企业微信模拟连接（非真实企业账号）",
       createdAt: "11:38",
     },
     {
       id: "m3",
       conversationId: "c1",
       sender: "customer",
-      content: "我们要对公签，合同里得写清交期和色差责任。",
+      content: "我们走对公采购，合同里需要写清分批交付、到货验收和不合格品处理。",
       createdAt: "11:40",
     },
   ],
@@ -99,7 +89,7 @@ export const messagesByConversation: Record<string, Message[]> = {
       id: "m4",
       conversationId: "c2",
       sender: "customer",
-      content: "打样费能不能免？我们以前的供应商不收打样费。",
+      content: "实物样确认后下单，样品费可以抵货款吗？我们这次预计做 300 套。",
       createdAt: "11:05",
     },
     {
@@ -107,14 +97,14 @@ export const messagesByConversation: Record<string, Message[]> = {
       conversationId: "c2",
       sender: "agent",
       content:
-        "电子效果图不收费。实物打样马克杯 80 元/款，同款订单满起订量后可抵货款。",
+        "电子效果图不收费。礼盒实物打样 120 元/款，正式订单达到该款起订量后可抵货款。",
       createdAt: "11:12",
     },
     {
       id: "m6",
       conversationId: "c2",
       sender: "customer",
-      content: "那我先要效果图，先不打实物样。",
+      content: "明白，我先提交 logo 和预算区间，先看电子效果图。",
       createdAt: "11:18",
     },
   ],
@@ -123,7 +113,7 @@ export const messagesByConversation: Record<string, Message[]> = {
       id: "m7",
       conversationId: "c3",
       sender: "customer",
-      content: "公司年会想订 200 个陶瓷杯，能不能印单色 logo？",
+      content: "启明生物年会准备 200 套礼盒，想放保温杯和笔记本，可以定制 logo 吗？",
       createdAt: "10:55",
     },
   ],
@@ -132,24 +122,8 @@ export const messagesByConversation: Record<string, Message[]> = {
       id: "m8",
       conversationId: "c4",
       sender: "customer",
-      content: "能不能先出效果图再付定金？",
+      content: "采购审批需要设计稿附件，可以先出效果图，内部确认后再付定金吗？",
       createdAt: "昨天 18:20",
-    },
-  ],
-  c5: [
-    {
-      id: "m9",
-      conversationId: "c5",
-      sender: "customer",
-      content: "去年那批杯子颜色偏了，这次 logo 能指定潘通色吗？",
-      createdAt: "昨天 14:40",
-    },
-    {
-      id: "m10",
-      conversationId: "c5",
-      sender: "agent",
-      content: "可以。请提供潘通色号，我们会标在效果图里再给您确认。",
-      createdAt: "昨天 14:52",
     },
   ],
 };
@@ -163,9 +137,9 @@ export const draftsByConversation: Record<string, ReplyDraft> = {
       "单笔超过 5000 元或需要对公合同时，由商务出具合同，自动回复不承诺违约金条款。我先记下交期和色差要求，请商务同事跟进。",
     citations: [
       {
-        documentTitle: "定金、开票与合同",
+        documentTitle: "采购合同、开票与验收",
         quote:
-          "单笔超过 5000 元或需对公合同时，由商务出具合同。自动回复不承诺具体违约金比例。",
+          "对公采购由商务出具合同，明确交付批次、验收标准和售后处理。自动回复不承诺具体违约金比例。",
       },
     ],
   },
@@ -174,12 +148,12 @@ export const draftsByConversation: Record<string, ReplyDraft> = {
     conversationId: "c3",
     status: "pending",
     content:
-      "可以。陶瓷马克杯单色丝印起订 100 个，200 个可以做。常规交期 7 个工作日（从效果图确认并付定金起算）。请提供矢量 logo。",
+      "可以按需求组合礼盒。启明生物这批 200 套可先确认产品清单和预算，再核实各 SKU 起订量与交期。请提供 logo 矢量稿及期望到货日期。",
     citations: [
       {
-        documentTitle: "起订量与印制工艺",
+        documentTitle: "企业礼赠产品与定制规则",
         quote:
-          "陶瓷马克杯单色丝印起订 100 个。200 个可以做。常规交期 7 个工作日。",
+          "企业礼盒可组合保温杯、笔记本、帆布袋等产品；不同 SKU 起订量和交期需分别核算。",
       },
     ],
   },
@@ -188,11 +162,11 @@ export const draftsByConversation: Record<string, ReplyDraft> = {
 export const knowledgeDocs: KnowledgeDoc[] = [
   {
     id: "k1",
-    title: "起订量与印制工艺",
+    title: "企业礼赠产品与定制规则",
     sourceType: "faq",
     status: "ready",
     updatedAt: "2026-10-16",
-    excerpt: "gift-presales-v2 · 马克杯/帆布袋/礼盒起订与工艺",
+    excerpt: "yunfan-enterprise-demo-v4 · 企业员工礼赠、客户答谢礼盒与定制采购",
   },
   {
     id: "k2",
@@ -200,15 +174,15 @@ export const knowledgeDocs: KnowledgeDoc[] = [
     sourceType: "faq",
     status: "ready",
     updatedAt: "2026-10-15",
-    excerpt: "gift-presales-v2 · 效果图免费；实物打样可抵货款",
+    excerpt: "yunfan-enterprise-demo-v4 · 效果图免费；实物打样可抵货款",
   },
   {
     id: "k3",
-    title: "定金、开票与合同",
+    title: "采购合同、开票与验收",
     sourceType: "faq",
     status: "ready",
     updatedAt: "2026-10-14",
-    excerpt: "gift-presales-v2 · 30% 定金；合同与专票走商务",
+    excerpt: "yunfan-enterprise-demo-v4 · 30% 定金；合同与专票走商务",
   },
   {
     id: "k4",
@@ -224,14 +198,14 @@ export const knowledgeDocs: KnowledgeDoc[] = [
     sourceType: "faq",
     status: "ready",
     updatedAt: "2026-10-17",
-    excerpt: "gift-presales-v2 · 常规交期、加急与潘通色差",
+    excerpt: "yunfan-enterprise-demo-v4 · 常规交期、加急与潘通色差",
   },
 ];
 
 export const wecomConnections: WecomConnection[] = [
   {
     id: "w1",
-    displayName: "微信客服演示连接",
+    displayName: "微信客服模拟演示连接",
     channelType: "wecom_mock",
     capability: "wechat_kf",
     status: "connected",

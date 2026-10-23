@@ -50,7 +50,11 @@ export class MembersService {
       action: 'member.invite',
       targetType: 'user',
       targetId: member.userId,
-      detail: { email: member.email, role: member.role },
+      detail: {
+        email: member.email,
+        displayName: member.displayName,
+        role: member.role,
+      },
     });
     return member;
   }
@@ -62,6 +66,8 @@ export class MembersService {
     roleRaw?: string,
   ) {
     const role = this.requireRole(roleRaw);
+    const members = await this.store.listTenantMembers(tenantId);
+    const previous = members.find((item) => item.userId === userId);
     const member = await this.store.updateTenantMemberRole(
       tenantId,
       userId,
@@ -73,7 +79,12 @@ export class MembersService {
       action: 'member.update_role',
       targetType: 'user',
       targetId: userId,
-      detail: { role },
+      detail: {
+        email: member.email,
+        displayName: member.displayName,
+        previousRole: previous?.role,
+        role,
+      },
     });
     return member;
   }

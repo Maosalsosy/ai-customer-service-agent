@@ -823,8 +823,14 @@ export function InboxWorkbench() {
                       className="px-2.5 py-1 text-xs"
                       disabled={knowledgeSubmitting || !messages.some((message) => message.sender === "customer")}
                       onClick={async () => {
-                        const question = [...messages].reverse().find((message) => message.sender === "customer")?.content;
+                        const question = [...messages].reverse().find((message) => message.sender === "customer")?.content?.trim();
                         if (!question) return;
+                        const meaningful = question.replace(/[\s\p{P}\p{S}]+/gu, "");
+                        if (meaningful.length < 2) {
+                          showToast("客户消息缺少实际内容，无法提交知识审核");
+                          return;
+                        }
+                        if (knowledgeSubmitting) return;
                         setKnowledgeSubmitting(true);
                         try {
                           await api.submitKnowledgeQuestion(question);

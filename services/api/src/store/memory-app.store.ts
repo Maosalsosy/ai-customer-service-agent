@@ -32,7 +32,10 @@ import {
 import {
   buildSupportAnalytics,
 } from '../analytics/build-support-analytics.js';
-import type { AnalyticsPeriod } from '../analytics/analytics-range.js';
+import {
+  resolveDemoClockLabel,
+  type AnalyticsPeriod,
+} from '../analytics/analytics-range.js';
 import type {
   Conversation,
   ConversationStatus,
@@ -52,35 +55,7 @@ import type {
 /** 把演示时钟文案（如 11:38 / 昨天 18:20）转成可用 Date */
 function parseDemoInstant(raw: string | undefined, fallback = new Date()): Date {
   if (!raw) return fallback;
-  const trimmed = raw.trim();
-  if (/^\d{4}-\d{2}-\d{2}T/.test(trimmed)) {
-    const d = new Date(trimmed);
-    return Number.isNaN(d.getTime()) ? fallback : d;
-  }
-  const now = new Date();
-  const today = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate(),
-    12,
-    0,
-    0,
-  );
-  if (trimmed === '昨天' || trimmed.startsWith('昨天')) {
-    const base = new Date(today.getTime() - 24 * 60 * 60 * 1000);
-    const hm = trimmed.match(/(\d{1,2}):(\d{2})/);
-    if (hm) {
-      base.setHours(Number(hm[1]), Number(hm[2]), 0, 0);
-    }
-    return base;
-  }
-  const hm = trimmed.match(/^(\d{1,2}):(\d{2})$/);
-  if (hm) {
-    const d = new Date(today);
-    d.setHours(Number(hm[1]), Number(hm[2]), 0, 0);
-    return d;
-  }
-  return fallback;
+  return resolveDemoClockLabel(raw, fallback);
 }
 
 @Injectable()

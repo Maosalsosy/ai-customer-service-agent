@@ -27,7 +27,7 @@ export const DEMO_TENANT: Tenant = {
 export const DEMO_CATALOG_TITLE = '企业礼赠产品与定制规则';
 
 /** 售前知识库版本标记（写入 excerpt）。变更后启动时会重灌演示知识与会话。 */
-export const DEMO_KB_VERSION = 'yunfan-enterprise-demo-v3';
+export const DEMO_KB_VERSION = 'yunfan-enterprise-demo-v4';
 
 export const DEMO_USER: User = {
   id: 'user-linxiao',
@@ -89,16 +89,24 @@ export const DEMO_PASSWORD_HASH =
 
 export const DEMO_CONNECTION_ID = 'conn-mock-1';
 
-/** 演示客户在渠道侧的会话键（同一客户始终落到同一会话）。 */
+/** 演示客户在渠道侧的会话键前缀（同一客户始终落到同一会话）。 */
 export const DEMO_CUSTOMER_EXTERNAL_ID = 'demo-customer-portal';
 
+/** 客户门户 ↔ 渠道会话键：`demo-customer-portal:{userId}`。 */
+export function demoPortalExternalId(userId: string) {
+  return `${DEMO_CUSTOMER_EXTERNAL_ID}:${userId}`;
+}
+
+/** README 演示客户：一人一会话。 */
 export function createSeedConversations(): Conversation[] {
+  const [lin, suwan, helei, mating] = DEMO_CUSTOMERS;
   return [
     {
       id: 'c1',
       tenantId: DEMO_TENANT.id,
       connectionId: DEMO_CONNECTION_ID,
-      contactName: '林女士',
+      externalConversationId: demoPortalExternalId(lin.id),
+      contactName: lin.displayName,
       contactMeta: '青禾资本 · 行政采购',
       preview: '首批 600 份员工入职礼，合同交期和验收标准怎么写？',
       status: 'waiting_human',
@@ -112,7 +120,8 @@ export function createSeedConversations(): Conversation[] {
       id: 'c2',
       tenantId: DEMO_TENANT.id,
       connectionId: DEMO_CONNECTION_ID,
-      contactName: '苏晚',
+      externalConversationId: demoPortalExternalId(suwan.id),
+      contactName: suwan.displayName,
       contactMeta: '雾凇科技 · 行政采购',
       preview: '实物样确认后下单，样品费可以抵货款吗？',
       status: 'in_progress',
@@ -126,7 +135,8 @@ export function createSeedConversations(): Conversation[] {
       id: 'c3',
       tenantId: DEMO_TENANT.id,
       connectionId: DEMO_CONNECTION_ID,
-      contactName: '何磊',
+      externalConversationId: demoPortalExternalId(helei.id),
+      contactName: helei.displayName,
       contactMeta: '启明生物 · 综合管理部',
       preview: '年会礼盒首批 200 套，能否加印公司 logo？',
       status: 'open',
@@ -140,27 +150,14 @@ export function createSeedConversations(): Conversation[] {
       id: 'c4',
       tenantId: DEMO_TENANT.id,
       connectionId: DEMO_CONNECTION_ID,
-      contactName: '马婷',
+      externalConversationId: demoPortalExternalId(mating.id),
+      contactName: mating.displayName,
       contactMeta: '嘉禾律师事务所 · 品牌市场',
       preview: '先确认设计稿和烫金位置，再走采购审批可以吗？',
       status: 'open',
       handlingMode: 'ai',
       contactPolicy: 'ai',
       assignee: null,
-      updatedAt: '昨天',
-      unread: false,
-    },
-    {
-      id: 'c5',
-      tenantId: DEMO_TENANT.id,
-      connectionId: DEMO_CONNECTION_ID,
-      contactName: '苏晚',
-      contactMeta: '雾凇科技 · 行政采购',
-      preview: '复购礼盒要指定潘通色，如何确认色差？',
-      status: 'in_progress',
-      handlingMode: 'human',
-      contactPolicy: 'human',
-      assignee: '林晓',
       updatedAt: '昨天',
       unread: false,
     },
@@ -241,25 +238,6 @@ export function createSeedMessages(): Message[] {
       sender: 'customer',
       content: '采购审批需要设计稿附件，可以先出效果图，内部确认后再付定金吗？',
       createdAt: '昨天 18:20',
-    },
-    {
-      id: 'm9',
-      tenantId: DEMO_TENANT.id,
-      conversationId: 'c5',
-      externalMessageId: 'ext-m9',
-      sender: 'customer',
-      content: '上次礼盒烫金颜色和确认稿有差异，这次可以按潘通色号打样签样吗？',
-      createdAt: '昨天 14:40',
-    },
-    {
-      id: 'm10',
-      tenantId: DEMO_TENANT.id,
-      conversationId: 'c5',
-      externalMessageId: 'ext-m10',
-      sender: 'agent',
-      content: '可以提供潘通色号，我们会在效果图中标注。建议先做实物样并签样，批量生产按确认样验收。',
-      createdAt: '昨天 14:52',
-      deliveryStatus: 'sent',
     },
   ];
 }

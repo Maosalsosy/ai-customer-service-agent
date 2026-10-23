@@ -100,7 +100,10 @@ export class AuthService implements OnModuleInit {
       action: meta.audit,
       targetType: 'user',
       targetId: user.id,
-      detail: { email: meta.email ?? user.email, tenantId: current.tenant.id },
+      detail: {
+        email: meta.email ?? user.email,
+        displayName: user.displayName,
+      },
     });
     return {
       accessToken: token,

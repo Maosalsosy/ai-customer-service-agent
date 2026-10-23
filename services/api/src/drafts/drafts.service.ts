@@ -54,18 +54,19 @@ export class DraftsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async update(tenantId: string, id: string, content: string, actorId?: string) {
+    const draft = (await this.store.updateDraft(
+      tenantId,
+      id,
+      content,
+    )) as ReplyDraft;
     this.audit.record({
       tenantId,
       actorId,
       action: 'draft.update',
       targetType: 'reply_draft',
       targetId: id,
+      detail: { conversationId: draft.conversationId },
     });
-    const draft = (await this.store.updateDraft(
-      tenantId,
-      id,
-      content,
-    )) as ReplyDraft;
     this.realtime.publish(tenantId, {
       type: 'draft.updated',
       conversationId: draft.conversationId,
@@ -75,18 +76,19 @@ export class DraftsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async accept(tenantId: string, id: string, actorId?: string) {
+    const draft = (await this.store.reviewDraft(
+      tenantId,
+      id,
+      'accepted',
+    )) as ReplyDraft;
     this.audit.record({
       tenantId,
       actorId,
       action: 'draft.accept',
       targetType: 'reply_draft',
       targetId: id,
+      detail: { conversationId: draft.conversationId },
     });
-    const draft = (await this.store.reviewDraft(
-      tenantId,
-      id,
-      'accepted',
-    )) as ReplyDraft;
     this.realtime.publish(tenantId, {
       type: 'draft.updated',
       conversationId: draft.conversationId,
@@ -96,18 +98,19 @@ export class DraftsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async reject(tenantId: string, id: string, actorId?: string) {
+    const draft = (await this.store.reviewDraft(
+      tenantId,
+      id,
+      'rejected',
+    )) as ReplyDraft;
     this.audit.record({
       tenantId,
       actorId,
       action: 'draft.reject',
       targetType: 'reply_draft',
       targetId: id,
+      detail: { conversationId: draft.conversationId },
     });
-    const draft = (await this.store.reviewDraft(
-      tenantId,
-      id,
-      'rejected',
-    )) as ReplyDraft;
     this.realtime.publish(tenantId, {
       type: 'draft.updated',
       conversationId: draft.conversationId,
@@ -214,6 +217,8 @@ export class DraftsService implements OnModuleInit, OnModuleDestroy {
         targetId: id,
         detail: {
           ok: false,
+          conversationId: draft.conversationId,
+          contactName: conversation.contactName,
           deliveryStatus: delivery.delivery.status,
           errorMessage: delivery.delivery.errorMessage,
         },
@@ -238,6 +243,7 @@ export class DraftsService implements OnModuleInit, OnModuleDestroy {
       detail: {
         ok: true,
         conversationId: draft.conversationId,
+        contactName: conversation.contactName,
         deliveryStatus: delivery.delivery.status,
         simulated: delivery.delivery.simulated,
       },

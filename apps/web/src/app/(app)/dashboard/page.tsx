@@ -22,7 +22,16 @@ function TrendBars({
   series: SupportAnalytics["series"];
   metric: "conversations" | "messages" | "acceptedDrafts";
 }) {
-  const max = Math.max(1, ...series.map((row) => row[metric]));
+  const values = series.map((row) => row[metric]);
+  const peak = Math.max(0, ...values);
+  if (peak <= 0) {
+    return (
+      <p className="flex h-44 items-center justify-center border-b border-line text-center text-sm text-ink-soft">
+        此时段暂无新增；有新会话或消息后会出现柱状
+      </p>
+    );
+  }
+  const max = Math.max(1, peak);
   const dense = series.length > 14;
 
   return (
@@ -51,7 +60,8 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [pendingKnowledge, setPendingKnowledge] = useState<number | null>(null);
   const [admin] = useState(() => isAdminRole(getStoredUser()?.role));
-  const [trendMetric, setTrendMetric] = useState<"conversations" | "messages" | "acceptedDrafts">("conversations");
+  // 默认看消息量：演示库会话 createdAt 可能停在入库日，今天「新建会话」易为空
+  const [trendMetric, setTrendMetric] = useState<"conversations" | "messages" | "acceptedDrafts">("messages");
   const [autoSendEnabled, setAutoSendEnabled] = useState<boolean | null>(null);
   const [modelName, setModelName] = useState<string | null>(null);
 

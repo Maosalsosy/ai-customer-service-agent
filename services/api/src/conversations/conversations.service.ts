@@ -132,7 +132,11 @@ export class ConversationsService implements OnModuleInit, OnModuleDestroy {
       action: 'contact.policy.updated',
       targetType: 'conversation',
       targetId: id,
-      detail: { policy, reason: normalizedReason },
+      detail: {
+        policy,
+        reason: normalizedReason,
+        contactName: conversation.contactName,
+      },
     });
     this.realtime.publish(tenantId, {
       type: 'conversation.updated',
@@ -193,7 +197,10 @@ export class ConversationsService implements OnModuleInit, OnModuleDestroy {
         mode === 'ai' ? 'conversation.mode_ai' : 'conversation.mode_human',
       targetType: 'conversation',
       targetId: id,
-      detail: assignee ? { displayName: assignee.displayName } : {},
+      detail: {
+        contactName: conversation.contactName,
+        ...(assignee ? { displayName: assignee.displayName } : {}),
+      },
     });
     if (mode === 'human') {
       await this.store.supersedePendingDrafts(tenantId, id);
@@ -214,15 +221,15 @@ export class ConversationsService implements OnModuleInit, OnModuleDestroy {
     reason?: string,
     actorId?: string,
   ) {
+    const conversation = await this.store.escalate(tenantId, id, reason);
     this.audit.record({
       tenantId,
       actorId,
       action: 'conversation.escalate',
       targetType: 'conversation',
       targetId: id,
-      detail: { reason },
+      detail: { reason, contactName: conversation.contactName },
     });
-    const conversation = await this.store.escalate(tenantId, id, reason);
     this.realtime.publish(tenantId, {
       type: 'conversation.updated',
       conversationId: id,
@@ -281,6 +288,7 @@ export class ConversationsService implements OnModuleInit, OnModuleDestroy {
       targetType: 'conversation',
       targetId: id,
       detail: {
+        contactName: conversation.contactName,
         deliveryStatus: result.delivery.status,
         simulated: result.delivery.simulated,
         errorMessage: result.delivery.errorMessage,
@@ -401,7 +409,11 @@ export class ConversationsService implements OnModuleInit, OnModuleDestroy {
         action: 'contact.reply.suppressed',
         targetType: 'conversation',
         targetId: conversationId,
-        detail: { policy: 'blocked', source: 'inbound_message' },
+        detail: {
+          policy: 'blocked',
+          source: 'inbound_message',
+          contactName: conversation.contactName,
+        },
       });
       return;
     }
@@ -507,6 +519,7 @@ export class ConversationsService implements OnModuleInit, OnModuleDestroy {
       action: 'conversation.ai_draft',
       targetType: 'conversation',
       targetId: conversationId,
+      detail: { contactName: conversation.contactName },
     });
 
     const maybeEscalate = async (reason: string) => {

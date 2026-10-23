@@ -28,7 +28,10 @@ import {
 } from '../common/conversation-status.js';
 import { evaluateReplyPolicy } from '../common/reply-policy.js';
 import type { AnalyticsPeriod } from '../analytics/analytics-range.js';
-import { resolveAnalyticsRange } from '../analytics/analytics-range.js';
+import {
+  resolveAnalyticsRange,
+  resolveDemoClockLabel,
+} from '../analytics/analytics-range.js';
 import { buildSupportAnalytics } from '../analytics/build-support-analytics.js';
 import { hashPassword } from '../auth/password.js';
 import { isDemoSeedEnabled } from '../common/runtime-mode.js';
@@ -95,7 +98,114 @@ export class PrismaAppStore implements AppStore, OnModuleInit {
       return;
     }
     await this.seedIfEmpty();
+    await this.alignDemoPortalConversations();
+    await this.refreshDemoAnalyticsTimestamps();
     await this.indexReadyDemoKnowledge();
+  }
+
+  /** 演示库只保留 README 四个客户会话，并绑定门户 externalId。 */
+  private async alignDemoPortalConversations() {
+    const demoTenant = await this.prisma.tenant.findUnique({
+      where: { id: DEMO_TENANT.id },
+      select: { id: true },
+    });
+    if (!demoTenant) return;
+
+    const seeds = createSeedConversations();
+    const keepIds = seeds.map((row) => row.id);
+
+    await this.prisma.conversation.deleteMany({
+      where: { tenantId: DEMO_TENANT.id, id: { notIn: keepIds } },
+    });
+
+    for (const seed of seeds) {
+      const externalId = seed.externalConversationId;
+      if (!externalId) continue;
+      const contact = await this.prisma.externalContact.upsert({
+        where: {
+          tenantId_connectionId_externalUserId: {
+            tenantId: DEMO_TENANT.id,
+            connectionId: DEMO_CONNECTION_ID,
+            externalUserId: externalId,
+          },
+        },
+        create: {
+          id: `demo-contact-${seed.id}`,
+          tenantId: DEMO_TENANT.id,
+          connectionId: DEMO_CONNECTION_ID,
+          externalUserId: externalId,
+          displayName: seed.contactName,
+          source: 'demo',
+          policy: seed.contactPolicy,
+        },
+        update: {
+          displayName: seed.contactName,
+          policy: seed.contactPolicy,
+        },
+      });
+      await this.prisma.conversation.updateMany({
+        where: { tenantId: DEMO_TENANT.id, id: seed.id },
+        data: {
+          externalConversationId: externalId,
+          externalContactId: contact.id,
+          contactName: seed.contactName,
+          contactMeta: seed.contactMeta ?? null,
+        },
+      });
+    }
+
+    await this.prisma.externalContact.deleteMany({
+      where: {
+        tenantId: DEMO_TENANT.id,
+        conversations: { none: {} },
+      },
+    });
+  }
+
+  /** 把种子会话/消息时间对齐到「今天/昨天」上海墙钟，避免趋势图因入库日过旧而空柱。 */
+  private async refreshDemoAnalyticsTimestamps() {
+    const demoTenant = await this.prisma.tenant.findUnique({
+      where: { id: DEMO_TENANT.id },
+      select: { id: true },
+    });
+    if (!demoTenant) return;
+
+    const seedMessages = createSeedMessages();
+    for (const message of seedMessages) {
+      const createdAt = resolveDemoClockLabel(message.createdAt);
+      await this.prisma.message.updateMany({
+        where: { tenantId: DEMO_TENANT.id, id: message.id },
+        data: { createdAt },
+      });
+    }
+
+    for (const conversation of createSeedConversations()) {
+      const related = seedMessages.filter(
+        (message) => message.conversationId === conversation.id,
+      );
+      const messageTimes = related.map((message) =>
+        resolveDemoClockLabel(message.createdAt).getTime(),
+      );
+      const lastMessageAt = resolveDemoClockLabel(conversation.updatedAt);
+      const createdAt = messageTimes.length
+        ? new Date(Math.min(...messageTimes))
+        : lastMessageAt;
+      await this.prisma.conversation.updateMany({
+        where: { tenantId: DEMO_TENANT.id, id: conversation.id },
+        data: { createdAt, lastMessageAt, updatedAt: lastMessageAt },
+      });
+    }
+
+    for (const draft of createSeedDrafts()) {
+      const conversation = createSeedConversations().find(
+        (row) => row.id === draft.conversationId,
+      );
+      const createdAt = resolveDemoClockLabel(conversation?.updatedAt ?? '12:00');
+      await this.prisma.replyDraft.updateMany({
+        where: { tenantId: DEMO_TENANT.id, id: draft.id },
+        data: { createdAt },
+      });
+    }
   }
 
   private async ensureProductionBootstrap() {
@@ -245,11 +355,28 @@ export class PrismaAppStore implements AppStore, OnModuleInit {
     for (const c of createSeedConversations()) {
       const assignee =
         c.assignee === DEMO_USER.displayName ? DEMO_USER.id : null;
+      const externalId = c.externalConversationId;
+      const contactId = externalId ? `demo-contact-${c.id}` : null;
+      if (externalId && contactId) {
+        await this.prisma.externalContact.create({
+          data: {
+            id: contactId,
+            tenantId: c.tenantId,
+            connectionId: c.connectionId,
+            externalUserId: externalId,
+            displayName: c.contactName,
+            source: 'demo',
+            policy: c.contactPolicy,
+          },
+        });
+      }
       await this.prisma.conversation.create({
         data: {
           id: c.id,
           tenantId: c.tenantId,
           connectionId: c.connectionId,
+          externalConversationId: externalId ?? null,
+          externalContactId: contactId,
           contactName: c.contactName,
           contactMeta: c.contactMeta,
           preview: c.preview,
@@ -266,6 +393,7 @@ export class PrismaAppStore implements AppStore, OnModuleInit {
       const conversation = createSeedConversations().find(
         (c) => c.id === m.conversationId,
       );
+      const createdAt = resolveDemoClockLabel(m.createdAt);
       await this.prisma.message.create({
         data: {
           id: m.id,
@@ -279,7 +407,25 @@ export class PrismaAppStore implements AppStore, OnModuleInit {
           senderType: m.sender,
           content: m.content,
           deliveryStatus: m.deliveryStatus,
+          createdAt,
         },
+      });
+    }
+
+    for (const c of createSeedConversations()) {
+      const related = createSeedMessages().filter(
+        (message) => message.conversationId === c.id,
+      );
+      const messageTimes = related.map((message) =>
+        resolveDemoClockLabel(message.createdAt).getTime(),
+      );
+      const lastMessageAt = resolveDemoClockLabel(c.updatedAt);
+      const createdAt = messageTimes.length
+        ? new Date(Math.min(...messageTimes))
+        : lastMessageAt;
+      await this.prisma.conversation.update({
+        where: { id: c.id },
+        data: { createdAt, lastMessageAt, updatedAt: lastMessageAt },
       });
     }
 
@@ -2295,7 +2441,7 @@ export class PrismaAppStore implements AppStore, OnModuleInit {
         { targetType: { contains: query.q, mode: 'insensitive' } },
         { targetId: { contains: query.q, mode: 'insensitive' } },
         { actorId: { in: matchingQueryActors.map((item) => item.id) } },
-        ...['title', 'email', 'reason', 'reviewNote', 'policy', 'displayName', 'source'].map((key) => ({
+        ...['title', 'email', 'reason', 'reviewNote', 'policy', 'displayName', 'source', 'contactName', 'errorMessage'].map((key) => ({
           detail: { path: [key], string_contains: query.q, mode: 'insensitive' as const },
         })),
       ] } : {}),

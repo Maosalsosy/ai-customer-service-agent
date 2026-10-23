@@ -7,7 +7,7 @@ import {
 import { APP_STORE, type AppStore } from '../store/app-store.js';
 import {
   DEMO_CONNECTION_ID,
-  DEMO_CUSTOMER_EXTERNAL_ID,
+  demoPortalExternalId,
 } from '../store/seed.js';
 import type { User } from '../store/types.js';
 import { WecomInboundService } from '../wecom/wecom-inbound.service.js';
@@ -20,7 +20,7 @@ export class CustomerService {
   ) {}
 
   private externalId(user: User) {
-    return `${DEMO_CUSTOMER_EXTERNAL_ID}:${user.id}`;
+    return demoPortalExternalId(user.id);
   }
 
   async thread(tenantId: string, user: User) {

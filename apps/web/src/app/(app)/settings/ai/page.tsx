@@ -87,6 +87,7 @@ export default function AiSettingsPage() {
   const [systemPrompt, setSystemPrompt] = useState("");
   const [maxLength, setMaxLength] = useState(500);
   const [styleBusy, setStyleBusy] = useState(false);
+  const [styleOpen, setStyleOpen] = useState(false);
 
   const editing = items.find((item) => item.id === editingId) ?? null;
 
@@ -623,63 +624,86 @@ export default function AiSettingsPage() {
         </div>
       </Panel>
 
-      <Panel className="space-y-4 p-4">
-        <div>
-          <h2 className="text-sm font-medium text-ink">回复人设与语气</h2>
-          <p className="mt-1 text-xs text-ink-soft">
-            作用于本工作区全部 AI 草稿。模型连接仍在下方单独配置。
-          </p>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="语气">
-            <select
-              className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm text-ink"
-              value={tone}
-              disabled={settingsLoading || styleBusy}
-              onChange={(e) => setTone(e.target.value as AiReplyStyle["tone"])}
-            >
-              <option value="direct">直接简洁</option>
-              <option value="warm">亲切温和</option>
-              <option value="formal">正式书面</option>
-            </select>
-          </Field>
-          <Field label="长度上限（字）">
-            <TextInput
-              type="number"
-              min={50}
-              max={2000}
-              value={String(maxLength)}
-              disabled={settingsLoading || styleBusy}
-              onChange={(e) => setMaxLength(Number(e.target.value) || 500)}
-            />
-          </Field>
-        </div>
-        <Field label="人设称谓（可选）">
-          <TextInput
-            placeholder="例如：云帆礼品客服"
-            value={persona}
-            disabled={settingsLoading || styleBusy}
-            onChange={(e) => setPersona(e.target.value)}
-          />
-        </Field>
-        <Field label="补充指令（可选）">
-          <textarea
-            className="min-h-24 w-full rounded-md border border-line bg-white px-3 py-2 text-sm text-ink"
-            placeholder="例如：报价口径以知识库为准；不确定时先确认数量。"
-            value={systemPrompt}
-            disabled={settingsLoading || styleBusy}
-            onChange={(e) => setSystemPrompt(e.target.value)}
-          />
-        </Field>
-        <div className="flex justify-end">
-          <Button
-            type="button"
-            disabled={settingsLoading || styleBusy}
-            onClick={() => void saveReplyStyle()}
-          >
-            {styleBusy ? "保存中…" : "保存回复风格"}
-          </Button>
-        </div>
+      <Panel className="overflow-hidden">
+        <button
+          type="button"
+          className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left hover:bg-surface/60"
+          aria-expanded={styleOpen}
+          onClick={() => setStyleOpen((open) => !open)}
+        >
+          <div className="min-w-0">
+            <h2 className="text-sm font-medium text-ink">回复人设与语气</h2>
+            <p className="mt-1 text-xs text-ink-soft">
+              {styleOpen
+                ? "作用于本工作区全部 AI 草稿。模型连接仍在下方单独配置。"
+                : [
+                    tone === "warm" ? "亲切温和" : tone === "formal" ? "正式书面" : "直接简洁",
+                    `${maxLength} 字`,
+                    persona.trim() || null,
+                    systemPrompt.trim() ? "已设补充指令" : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+            </p>
+          </div>
+          <span className="shrink-0 pt-0.5 text-xs text-accent">
+            {styleOpen ? "收起" : "展开"}
+          </span>
+        </button>
+        {styleOpen ? (
+          <div className="space-y-4 border-t border-line px-4 py-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="语气">
+                <select
+                  className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm text-ink"
+                  value={tone}
+                  disabled={settingsLoading || styleBusy}
+                  onChange={(e) => setTone(e.target.value as AiReplyStyle["tone"])}
+                >
+                  <option value="direct">直接简洁</option>
+                  <option value="warm">亲切温和</option>
+                  <option value="formal">正式书面</option>
+                </select>
+              </Field>
+              <Field label="长度上限（字）">
+                <TextInput
+                  type="number"
+                  min={50}
+                  max={2000}
+                  value={String(maxLength)}
+                  disabled={settingsLoading || styleBusy}
+                  onChange={(e) => setMaxLength(Number(e.target.value) || 500)}
+                />
+              </Field>
+            </div>
+            <Field label="人设称谓（可选）">
+              <TextInput
+                placeholder="例如：云帆礼品客服"
+                value={persona}
+                disabled={settingsLoading || styleBusy}
+                onChange={(e) => setPersona(e.target.value)}
+              />
+            </Field>
+            <Field label="补充指令（可选）">
+              <textarea
+                className="min-h-24 w-full rounded-md border border-line bg-white px-3 py-2 text-sm text-ink"
+                placeholder="例如：报价口径以知识库为准；不确定时先确认数量。"
+                value={systemPrompt}
+                disabled={settingsLoading || styleBusy}
+                onChange={(e) => setSystemPrompt(e.target.value)}
+              />
+            </Field>
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                disabled={settingsLoading || styleBusy}
+                onClick={() => void saveReplyStyle()}
+              >
+                {styleBusy ? "保存中…" : "保存回复风格"}
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </Panel>
 
       <Panel>

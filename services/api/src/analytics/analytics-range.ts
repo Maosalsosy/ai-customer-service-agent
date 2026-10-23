@@ -37,7 +37,35 @@ function hourInTz(date: Date) {
     hour: '2-digit',
     hour12: false,
   }).formatToParts(date);
-  return Number(parts.find((p) => p.type === 'hour')?.value ?? '0');
+  const h = Number(parts.find((p) => p.type === 'hour')?.value ?? '0');
+  // 部分环境把 0 点格式化成 24
+  return h === 24 ? 0 : h;
+}
+
+/**
+ * 解析演示种子里的相对时钟文案（`11:38` / `昨天` / `昨天 18:20`）
+ * 为 Asia/Shanghai 墙钟，便于「今天」趋势始终有柱。
+ */
+export function resolveDemoClockLabel(raw: string, now = new Date()): Date {
+  const trimmed = raw.trim();
+  if (/^\d{4}-\d{2}-\d{2}T/.test(trimmed)) {
+    const parsed = new Date(trimmed);
+    return Number.isNaN(parsed.getTime()) ? now : parsed;
+  }
+  const { y, m, d } = ymdInTz(now);
+  if (trimmed === '昨天' || trimmed.startsWith('昨天')) {
+    const prev = addDaysYmd(y, m, d, -1);
+    const hm = trimmed.match(/(\d{1,2}):(\d{2})/);
+    if (hm) {
+      return shanghaiWall(prev.y, prev.m, prev.d, Number(hm[1]), Number(hm[2]));
+    }
+    return shanghaiWall(prev.y, prev.m, prev.d, 12, 0, 0);
+  }
+  const hm = trimmed.match(/^(\d{1,2}):(\d{2})$/);
+  if (hm) {
+    return shanghaiWall(y, m, d, Number(hm[1]), Number(hm[2]));
+  }
+  return now;
 }
 
 /** 上海墙钟 → UTC Date（东八区无夏令时） */

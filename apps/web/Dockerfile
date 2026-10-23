@@ -1,7 +1,9 @@
 FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --legacy-peer-deps
+# BuildKit 缓存 npm；网络不稳时可改回本机 npm run build + 仅打包 runner
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --legacy-peer-deps --fetch-retries=5 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000
 
 FROM node:22-alpine AS build
 WORKDIR /app
