@@ -39,14 +39,14 @@ docker compose up --build -d
 
 打开 **http://localhost:3000/login**。密码均为 `demo-password`（仅本地，勿用于生产）。
 
-| 账号 | 角色 |
-| --- | --- |
-| `agent@demo.aikefu.local` | 管理员 |
-| `kefu@demo.aikefu.local` | 客服（工作台 / 知识提交） |
-| `customer@demo.aikefu.local` | 客户门户 |
-| `suwan@demo.aikefu.local` | 独立演示会话 |
-| `helei@demo.aikefu.local` | 独立演示会话 |
-| `mating@demo.aikefu.local` | 独立演示会话 |
+| 账号 | 角色 | 用途 |
+| --- | --- | --- |
+| `agent@demo.aikefu.local` | 管理员 | 全功能 |
+| `kefu@demo.aikefu.local` | 客服 | 工作台 / 知识提交 |
+| `customer@demo.aikefu.local` | 客户 | 客户门户 |
+| `suwan@demo.aikefu.local` | 客户 | 独立演示会话 |
+| `helei@demo.aikefu.local` | 客户 | 独立演示会话 |
+| `mating@demo.aikefu.local` | 客户 | 独立演示会话 |
 
 建议用两个浏览器配置文件分别登录客服与客户，走通「消息 → AI → 人工 → 回复」。
 
@@ -84,17 +84,7 @@ docker compose down          # 停止，保留数据卷
 
 ## 技术架构
 
-```mermaid
-flowchart LR
-    Browser[管理员 / 客服 / 客户] --> Web[Next.js · 3000]
-    Web --> API[NestJS API · 3001]
-    API --> DB[(PostgreSQL + pgvector)]
-    API --> Redis[(Redis)]
-    API --> AI[FastAPI AI · 8000]
-    API --> WeCom[微信客服 API]
-    API -.演示.-> Mock[wecom_mock]
-    AI --> LLM[OpenAI 兼容模型]
-```
+![技术架构](assets/architecture.png)
 
 | 路径 | 内容 |
 | --- | --- |
